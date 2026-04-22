@@ -12,7 +12,18 @@ type Tool =
   | "switch"
   | "calibrate";
 
-type BaseShape = {
+type StrokeStyle = "solid" | "dashed";
+
+type ShapeStyle = {
+  strokeColor: string;
+  fillColor: string;
+  strokeWidth: number;
+  strokeStyle: StrokeStyle;
+  opacity: number;
+  rotation: number;
+};
+
+type BaseShape = ShapeStyle & {
   id: string;
   type: "rectangle" | "circle" | "line" | "cable" | "socket" | "switch";
   label: string;
@@ -77,9 +88,33 @@ type EstimateRow = {
   meters: number;
 };
 
+type HandleType =
+  | "move"
+  | "resize-se"
+  | "resize-circle"
+  | "rotate"
+  | "line-start"
+  | "line-end";
+
+type InteractionState = {
+  mode: HandleType;
+  shapeId: string;
+  startPointer: { x: number; y: number };
+  initialShape: Shape;
+};
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const SUPABASE_BUCKET = process.env.NEXT_PUBLIC_SUPABASE_BUCKET || "plans";
+
+const defaultStyle: ShapeStyle = {
+  strokeColor: "#d9e4ff",
+  fillColor: "#4b70ff",
+  strokeWidth: 2,
+  strokeStyle: "solid",
+  opacity: 0.18,
+  rotation: 0,
+};
 
 export default function ElectroBoard() {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -90,7 +125,7 @@ export default function ElectroBoard() {
   const [shapes, setShapes] = useState<Shape[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draftLine, setDraftLine] = useState<LineShape | null>(null);
-  const [dragOffset, setDragOffset] = useState<{ dx: number; dy: number } | null>(null);
+  const [interaction, setInteraction] = useState<InteractionState | null>(null);
   const [calibrationPoints, setCalibrationPoints] = useState<CalibrationPoint[]>([]);
   const [metersPerPixel, setMetersPerPixel] = useState<number>(0);
   const [calibrationDistanceMeters, setCalibrationDistanceMeters] = useState<string>("1");
@@ -99,6 +134,7 @@ export default function ElectroBoard() {
   const [planMime, setPlanMime] = useState<string>("");
   const [status, setStatus] = useState<string>("Готово");
   const [canvasSize] = useState({ width: 1400, height: 900 });
+  const [showStyleModal, setShowStyleModal] = useState(false);
 
   const selectedShape = useMemo(
     () => shapes.find((s) => s.id === selectedId) || null,
@@ -132,7 +168,6 @@ export default function ElectroBoard() {
       if (next.length === 2) {
         const px = distance(next[0].x, next[0].y, next[1].x, next[1].y);
         const meters = Number(calibrationDistanceMeters);
-
         if (px > 0 && meters > 0) {
           setMetersPerPixel(meters / px);
           setStatus(`Масштаб задан: ${meters.toFixed(2)} м на ${px.toFixed(0)} px`);
@@ -144,20 +179,36 @@ export default function ElectroBoard() {
     }
 
     if (tool === "select") {
-      const hit = [...shapes].reverse().find((shape) => isPointOnShape(point.x, point.y, shape));
+      const selected = selectedShape;
 
+      if (selected) {
+        const handle = hitTestHandle(point.x, point.y, selected);
+        if (handle) {
+          setInteraction({
+            mode: handle,
+            shapeId: selected.id,
+            startPointer: point,
+            initialShape: cloneShape(selected),
+          });
+          return;
+        }
+      }
+
+      const hit = [...shapes].reverse().find((shape) => isPointOnShape(point.x, point.y, shape));
       if (hit) {
         setSelectedId(hit.id);
-
-        if (hit.type !== "line" && hit.type !== "cable") {
-          setDragOffset({ dx: point.x - hit.x, dy: point.y - hit.y });
-        } else {
-          setDragOffset({ dx: point.x - hit.x, dy: point.y - hit.y });
-        }
-      } else {
-        setSelectedId(null);
-        setDragOffset(null);
+        setInteraction({
+          mode: "move",
+          shapeId: hit.id,
+          startPointer: point,
+          initialShape: cloneShape(hit),
+        });
+        return;
       }
+
+      setSelectedId(null);
+      setInteraction(null);
+      setShowStyleModal(false);
       return;
     }
 
@@ -170,9 +221,11 @@ export default function ElectroBoard() {
         width: 140,
         height: 80,
         label: "Прямоугольник",
+        ...defaultStyle,
       };
       setShapes((prev) => [...prev, shape]);
       setSelectedId(shape.id);
+      setTool("select");
       return;
     }
 
@@ -184,9 +237,11 @@ export default function ElectroBoard() {
         y: point.y,
         radius: 40,
         label: "Окружность",
+        ...defaultStyle,
       };
       setShapes((prev) => [...prev, shape]);
       setSelectedId(shape.id);
+      setTool("select");
       return;
     }
 
@@ -200,9 +255,12 @@ export default function ElectroBoard() {
         height: 36,
         label: "Розетка",
         groupName: "",
+        ...defaultStyle,
+        fillColor: "#00e7a7",
       };
       setShapes((prev) => [...prev, shape]);
       setSelectedId(shape.id);
+      setTool("select");
       return;
     }
 
@@ -216,9 +274,12 @@ export default function ElectroBoard() {
         height: 36,
         label: "Выключатель",
         groupName: "",
+        ...defaultStyle,
+        fillColor: "#ff7300",
       };
       setShapes((prev) => [...prev, shape]);
       setSelectedId(shape.id);
+      setTool("select");
       return;
     }
 
@@ -233,6 +294,10 @@ export default function ElectroBoard() {
         label: tool === "cable" ? "Кабель" : "Линия",
         groupName: "",
         cableType: tool === "cable" ? "ВВГнг 3x2.5" : "",
+        ...defaultStyle,
+        strokeColor: tool === "cable" ? "#ffbf47" : "#d9e4ff",
+        fillColor: "transparent",
+        strokeWidth: tool === "cable" ? 4 : 2,
       };
       setDraftLine(shape);
       setSelectedId(shape.id);
@@ -247,39 +312,14 @@ export default function ElectroBoard() {
       return;
     }
 
-    if (tool === "select" && selectedShape && dragOffset) {
-      setShapes((prev) =>
-        prev.map((shape) => {
-          if (shape.id !== selectedShape.id) return shape;
+    if (!interaction) return;
 
-          if (shape.type === "line" || shape.type === "cable") {
-            const dx = point.x - dragOffset.dx - shape.x;
-            const dy = point.y - dragOffset.dy - shape.y;
-            return {
-              ...shape,
-              x: shape.x + dx,
-              y: shape.y + dy,
-              x2: shape.x2 + dx,
-              y2: shape.y2 + dy,
-            };
-          }
-
-          if (shape.type === "circle") {
-            return {
-              ...shape,
-              x: point.x - dragOffset.dx,
-              y: point.y - dragOffset.dy,
-            };
-          }
-
-          return {
-            ...shape,
-            x: point.x - dragOffset.dx,
-            y: point.y - dragOffset.dy,
-          };
-        })
-      );
-    }
+    setShapes((prev) =>
+      prev.map((shape) => {
+        if (shape.id !== interaction.shapeId) return shape;
+        return transformShape(shape, interaction, point);
+      })
+    );
   }
 
   function handleCanvasMouseUp() {
@@ -288,13 +328,14 @@ export default function ElectroBoard() {
       setDraftLine(null);
       setTool("select");
     }
-    setDragOffset(null);
+    setInteraction(null);
   }
 
   function deleteSelected() {
     if (!selectedId) return;
     setShapes((prev) => prev.filter((s) => s.id !== selectedId));
     setSelectedId(null);
+    setShowStyleModal(false);
   }
 
   function clearAll() {
@@ -302,6 +343,8 @@ export default function ElectroBoard() {
     setSelectedId(null);
     setDraftLine(null);
     setCalibrationPoints([]);
+    setInteraction(null);
+    setShowStyleModal(false);
     setStatus("Холст очищен");
   }
 
@@ -322,7 +365,7 @@ export default function ElectroBoard() {
 
     try {
       const ext = file.name.split(".").pop() || "bin";
-      const objectPath = `plans/${projectId}-${Date.now()}.${ext}`;
+      const objectPath = `${projectId}-${Date.now()}.${ext}`;
 
       const uploadRes = await fetch(
         `${SUPABASE_URL}/storage/v1/object/${SUPABASE_BUCKET}/${objectPath}`,
@@ -445,6 +488,7 @@ export default function ElectroBoard() {
         setMetersPerPixel(parsed.metersPerPixel || 0);
         setShapes(parsed.shapes || []);
         setSelectedId(null);
+        setShowStyleModal(false);
         setStatus("JSON импортирован");
       } catch (error) {
         console.error(error);
@@ -505,6 +549,13 @@ export default function ElectroBoard() {
             Импорт JSON
             <input type="file" accept=".json" onChange={importJson} style={{ display: "none" }} />
           </label>
+          <button
+            style={selectedShape ? styles.btn : styles.btnDisabled}
+            onClick={() => setShowStyleModal((v) => !v)}
+            disabled={!selectedShape}
+          >
+            Стиль
+          </button>
           <button style={styles.btnDanger} onClick={deleteSelected}>
             Удалить
           </button>
@@ -519,8 +570,7 @@ export default function ElectroBoard() {
           <div style={styles.statusBar}>
             <span>{status}</span>
             <span>
-              Масштаб:{" "}
-              {metersPerPixel > 0 ? `${metersPerPixel.toFixed(5)} м / px` : "не задан"}
+              Масштаб: {metersPerPixel > 0 ? `${metersPerPixel.toFixed(5)} м / px` : "не задан"}
             </span>
           </div>
 
@@ -540,15 +590,22 @@ export default function ElectroBoard() {
               onMouseDown={handleCanvasMouseDown}
               onMouseMove={handleCanvasMouseMove}
               onMouseUp={handleCanvasMouseUp}
+              onMouseLeave={handleCanvasMouseUp}
             >
               <defs>
                 <pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse">
                   <path d="M 25 0 L 0 0 0 25" fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="1" />
                 </pattern>
               </defs>
+
               <rect x="0" y="0" width={canvasSize.width} height={canvasSize.height} fill="url(#grid)" />
 
-              {shapes.map((shape) => renderShape(shape, selectedId === shape.id, shapes))}
+              {shapes.map((shape) => (
+                <React.Fragment key={shape.id}>
+                  {renderShape(shape, selectedId === shape.id, shapes)}
+                  {selectedId === shape.id ? renderSelectionOverlay(shape) : null}
+                </React.Fragment>
+              ))}
 
               {draftLine ? renderShape(draftLine, true, shapes) : null}
 
@@ -572,6 +629,90 @@ export default function ElectroBoard() {
                 />
               ) : null}
             </svg>
+
+            {showStyleModal && selectedShape ? (
+              <div style={styles.styleModal}>
+                <div style={styles.modalTitle}>Стиль объекта</div>
+
+                <div style={styles.field}>
+                  <label style={styles.label}>Цвет линии</label>
+                  <input
+                    type="color"
+                    value={safeColor(selectedShape.strokeColor)}
+                    onChange={(e) => setShapePatch(selectedShape.id, { strokeColor: e.target.value })}
+                    style={styles.colorInput}
+                  />
+                </div>
+
+                {selectedShape.type !== "line" && selectedShape.type !== "cable" ? (
+                  <div style={styles.field}>
+                    <label style={styles.label}>Цвет заливки</label>
+                    <input
+                      type="color"
+                      value={safeColor(selectedShape.fillColor)}
+                      onChange={(e) => setShapePatch(selectedShape.id, { fillColor: e.target.value })}
+                      style={styles.colorInput}
+                    />
+                  </div>
+                ) : null}
+
+                <div style={styles.field}>
+                  <label style={styles.label}>Толщина линии</label>
+                  <input
+                    type="range"
+                    min={1}
+                    max={10}
+                    value={selectedShape.strokeWidth}
+                    onChange={(e) => setShapePatch(selectedShape.id, { strokeWidth: Number(e.target.value) })}
+                  />
+                </div>
+
+                <div style={styles.field}>
+                  <label style={styles.label}>Прозрачность</label>
+                  <input
+                    type="range"
+                    min={0.05}
+                    max={1}
+                    step={0.05}
+                    value={selectedShape.opacity}
+                    onChange={(e) => setShapePatch(selectedShape.id, { opacity: Number(e.target.value) })}
+                  />
+                </div>
+
+                <div style={styles.field}>
+                  <label style={styles.label}>Линия</label>
+                  <select
+                    value={selectedShape.strokeStyle}
+                    onChange={(e) =>
+                      setShapePatch(selectedShape.id, { strokeStyle: e.target.value as StrokeStyle })
+                    }
+                    style={styles.input}
+                  >
+                    <option value="solid">Сплошная</option>
+                    <option value="dashed">Пунктир</option>
+                  </select>
+                </div>
+
+                {selectedShape.type !== "circle" &&
+                selectedShape.type !== "line" &&
+                selectedShape.type !== "cable" ? (
+                  <div style={styles.field}>
+                    <label style={styles.label}>Поворот</label>
+                    <input
+                      type="range"
+                      min={-180}
+                      max={180}
+                      value={selectedShape.rotation}
+                      onChange={(e) => setShapePatch(selectedShape.id, { rotation: Number(e.target.value) })}
+                    />
+                  </div>
+                ) : null}
+
+                <button style={styles.btn} onClick={() => setShowStyleModal(false)}>
+                  Закрыть
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -636,165 +777,10 @@ export default function ElectroBoard() {
                   </div>
                 ) : null}
 
-                {selectedShape.type === "rectangle" && (
-                  <>
-                    <div style={styles.field}>
-                      <label style={styles.label}>X</label>
-                      <input
-                        type="number"
-                        value={selectedShape.x}
-                        onChange={(e) => setShapePatch(selectedShape.id, { x: Number(e.target.value) })}
-                        style={styles.input}
-                      />
-                    </div>
-                    <div style={styles.field}>
-                      <label style={styles.label}>Y</label>
-                      <input
-                        type="number"
-                        value={selectedShape.y}
-                        onChange={(e) => setShapePatch(selectedShape.id, { y: Number(e.target.value) })}
-                        style={styles.input}
-                      />
-                    </div>
-                    <div style={styles.field}>
-                      <label style={styles.label}>Ширина</label>
-                      <input
-                        type="number"
-                        value={selectedShape.width}
-                        onChange={(e) => setShapePatch(selectedShape.id, { width: Number(e.target.value) })}
-                        style={styles.input}
-                      />
-                    </div>
-                    <div style={styles.field}>
-                      <label style={styles.label}>Высота</label>
-                      <input
-                        type="number"
-                        value={selectedShape.height}
-                        onChange={(e) => setShapePatch(selectedShape.id, { height: Number(e.target.value) })}
-                        style={styles.input}
-                      />
-                    </div>
-                  </>
-                )}
-
-                {selectedShape.type === "circle" && (
-                  <>
-                    <div style={styles.field}>
-                      <label style={styles.label}>X</label>
-                      <input
-                        type="number"
-                        value={selectedShape.x}
-                        onChange={(e) => setShapePatch(selectedShape.id, { x: Number(e.target.value) })}
-                        style={styles.input}
-                      />
-                    </div>
-                    <div style={styles.field}>
-                      <label style={styles.label}>Y</label>
-                      <input
-                        type="number"
-                        value={selectedShape.y}
-                        onChange={(e) => setShapePatch(selectedShape.id, { y: Number(e.target.value) })}
-                        style={styles.input}
-                      />
-                    </div>
-                    <div style={styles.field}>
-                      <label style={styles.label}>Радиус</label>
-                      <input
-                        type="number"
-                        value={selectedShape.radius}
-                        onChange={(e) => setShapePatch(selectedShape.id, { radius: Number(e.target.value) })}
-                        style={styles.input}
-                      />
-                    </div>
-                  </>
-                )}
-
-                {(selectedShape.type === "socket" || selectedShape.type === "switch") && (
-                  <>
-                    <div style={styles.field}>
-                      <label style={styles.label}>X</label>
-                      <input
-                        type="number"
-                        value={selectedShape.x}
-                        onChange={(e) => setShapePatch(selectedShape.id, { x: Number(e.target.value) })}
-                        style={styles.input}
-                      />
-                    </div>
-                    <div style={styles.field}>
-                      <label style={styles.label}>Y</label>
-                      <input
-                        type="number"
-                        value={selectedShape.y}
-                        onChange={(e) => setShapePatch(selectedShape.id, { y: Number(e.target.value) })}
-                        style={styles.input}
-                      />
-                    </div>
-                    <div style={styles.field}>
-                      <label style={styles.label}>Ширина</label>
-                      <input
-                        type="number"
-                        value={selectedShape.width}
-                        onChange={(e) => setShapePatch(selectedShape.id, { width: Number(e.target.value) })}
-                        style={styles.input}
-                      />
-                    </div>
-                    <div style={styles.field}>
-                      <label style={styles.label}>Высота</label>
-                      <input
-                        type="number"
-                        value={selectedShape.height}
-                        onChange={(e) => setShapePatch(selectedShape.id, { height: Number(e.target.value) })}
-                        style={styles.input}
-                      />
-                    </div>
-                    <div style={styles.hint}>
-                      Привязка к кабелю определяется автоматически по ближайшей кабельной линии той же группы.
-                    </div>
-                  </>
-                )}
-
                 {(selectedShape.type === "line" || selectedShape.type === "cable") && (
-                  <>
-                    <div style={styles.field}>
-                      <label style={styles.label}>X1</label>
-                      <input
-                        type="number"
-                        value={selectedShape.x}
-                        onChange={(e) => setShapePatch(selectedShape.id, { x: Number(e.target.value) })}
-                        style={styles.input}
-                      />
-                    </div>
-                    <div style={styles.field}>
-                      <label style={styles.label}>Y1</label>
-                      <input
-                        type="number"
-                        value={selectedShape.y}
-                        onChange={(e) => setShapePatch(selectedShape.id, { y: Number(e.target.value) })}
-                        style={styles.input}
-                      />
-                    </div>
-                    <div style={styles.field}>
-                      <label style={styles.label}>X2</label>
-                      <input
-                        type="number"
-                        value={selectedShape.x2}
-                        onChange={(e) => setShapePatch(selectedShape.id, { x2: Number(e.target.value) })}
-                        style={styles.input}
-                      />
-                    </div>
-                    <div style={styles.field}>
-                      <label style={styles.label}>Y2</label>
-                      <input
-                        type="number"
-                        value={selectedShape.y2}
-                        onChange={(e) => setShapePatch(selectedShape.id, { y2: Number(e.target.value) })}
-                        style={styles.input}
-                      />
-                    </div>
-                    <div style={styles.hint}>
-                      Длина: {lineLengthMeters(selectedShape, metersPerPixel).toFixed(2)} м
-                    </div>
-                  </>
+                  <div style={styles.hint}>
+                    Длина: {lineLengthMeters(selectedShape, metersPerPixel).toFixed(2)} м
+                  </div>
                 )}
               </>
             )}
@@ -823,24 +809,31 @@ export default function ElectroBoard() {
 }
 
 function renderShape(shape: Shape, selected: boolean, allShapes: Shape[]) {
-  const stroke = selected ? "#79a6ff" : "#d9e4ff";
-  const strokeWidth = selected ? 3 : 2;
-  const labelY = ("radius" in shape ? shape.y - shape.radius - 10 : shape.y - 12);
+  const stroke = selected ? "#79a6ff" : shape.strokeColor;
+  const fill = shape.type === "line" || shape.type === "cable"
+    ? "transparent"
+    : hexToRgba(shape.fillColor, shape.opacity);
+
+  const dash = shape.strokeStyle === "dashed" ? "8 6" : undefined;
 
   if (shape.type === "rectangle") {
+    const cx = shape.x + shape.width / 2;
+    const cy = shape.y + shape.height / 2;
+
     return (
-      <g key={shape.id}>
+      <g transform={`rotate(${shape.rotation} ${cx} ${cy})`}>
         <rect
           x={shape.x}
           y={shape.y}
           width={shape.width}
           height={shape.height}
-          fill="rgba(75,112,255,.12)"
+          fill={fill}
           stroke={stroke}
-          strokeWidth={strokeWidth}
+          strokeWidth={shape.strokeWidth}
+          strokeDasharray={dash}
           rx="6"
         />
-        <text x={shape.x + 6} y={labelY} fill="#f2f6ff" fontSize="14">
+        <text x={shape.x + 6} y={shape.y - 10} fill="#f2f6ff" fontSize="14">
           {shape.label}
         </text>
       </g>
@@ -849,16 +842,17 @@ function renderShape(shape: Shape, selected: boolean, allShapes: Shape[]) {
 
   if (shape.type === "circle") {
     return (
-      <g key={shape.id}>
+      <g>
         <circle
           cx={shape.x}
           cy={shape.y}
           r={shape.radius}
-          fill="rgba(75,112,255,.12)"
+          fill={fill}
           stroke={stroke}
-          strokeWidth={strokeWidth}
+          strokeWidth={shape.strokeWidth}
+          strokeDasharray={dash}
         />
-        <text x={shape.x + shape.radius + 6} y={labelY} fill="#f2f6ff" fontSize="14">
+        <text x={shape.x + shape.radius + 6} y={shape.y - shape.radius - 10} fill="#f2f6ff" fontSize="14">
           {shape.label}
         </text>
       </g>
@@ -867,15 +861,16 @@ function renderShape(shape: Shape, selected: boolean, allShapes: Shape[]) {
 
   if (shape.type === "line" || shape.type === "cable") {
     return (
-      <g key={shape.id}>
+      <g>
         <line
           x1={shape.x}
           y1={shape.y}
           x2={shape.x2}
           y2={shape.y2}
-          stroke={shape.type === "cable" ? "#ffbf47" : stroke}
-          strokeWidth={shape.type === "cable" ? 4 : strokeWidth}
-          strokeDasharray={shape.type === "cable" ? "0" : "9 7"}
+          stroke={stroke}
+          strokeWidth={shape.strokeWidth}
+          strokeDasharray={dash}
+          opacity={shape.opacity}
         />
         <text
           x={(shape.x + shape.x2) / 2 + 6}
@@ -891,18 +886,21 @@ function renderShape(shape: Shape, selected: boolean, allShapes: Shape[]) {
 
   if (shape.type === "socket") {
     const linkedCableId = getLinkedCableId(shape, allShapes);
+    const cx = shape.x;
+    const cy = shape.y;
 
     return (
-      <g key={shape.id}>
+      <g transform={`rotate(${shape.rotation} ${cx} ${cy})`}>
         <rect
           x={shape.x - shape.width / 2}
           y={shape.y - shape.height / 2}
           width={shape.width}
           height={shape.height}
           rx="10"
-          fill="rgba(0,231,167,.10)"
+          fill={fill}
           stroke={stroke}
-          strokeWidth={strokeWidth}
+          strokeWidth={shape.strokeWidth}
+          strokeDasharray={dash}
         />
         <circle cx={shape.x - 8} cy={shape.y} r="4" fill={stroke} />
         <circle cx={shape.x + 8} cy={shape.y} r="4" fill={stroke} />
@@ -919,17 +917,21 @@ function renderShape(shape: Shape, selected: boolean, allShapes: Shape[]) {
   }
 
   if (shape.type === "switch") {
+    const cx = shape.x;
+    const cy = shape.y;
+
     return (
-      <g key={shape.id}>
+      <g transform={`rotate(${shape.rotation} ${cx} ${cy})`}>
         <rect
           x={shape.x - shape.width / 2}
           y={shape.y - shape.height / 2}
           width={shape.width}
           height={shape.height}
           rx="6"
-          fill="rgba(255,115,0,.10)"
+          fill={fill}
           stroke={stroke}
-          strokeWidth={strokeWidth}
+          strokeWidth={shape.strokeWidth}
+          strokeDasharray={dash}
         />
         <line
           x1={shape.x - 10}
@@ -937,7 +939,7 @@ function renderShape(shape: Shape, selected: boolean, allShapes: Shape[]) {
           x2={shape.x + 10}
           y2={shape.y + 12}
           stroke={stroke}
-          strokeWidth="3"
+          strokeWidth={Math.max(2, shape.strokeWidth)}
         />
         <text x={shape.x + 28} y={shape.y + 4} fill="#f2f6ff" fontSize="14">
           {shape.label} {shape.groupName || ""}
@@ -947,6 +949,245 @@ function renderShape(shape: Shape, selected: boolean, allShapes: Shape[]) {
   }
 
   return null;
+}
+
+function renderSelectionOverlay(shape: Shape) {
+  if (shape.type === "line" || shape.type === "cable") {
+    const midX = (shape.x + shape.x2) / 2;
+    const midY = (shape.y + shape.y2) / 2;
+
+    return (
+      <g>
+        <circle cx={shape.x} cy={shape.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" />
+        <circle cx={shape.x2} cy={shape.y2} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" />
+        <circle cx={midX} cy={midY} r="7" fill="#3d63ff" stroke="#fff" strokeWidth="2" />
+      </g>
+    );
+  }
+
+  if (shape.type === "circle") {
+    return (
+      <g>
+        <circle
+          cx={shape.x}
+          cy={shape.y}
+          r={shape.radius + 8}
+          fill="none"
+          stroke="#79a6ff"
+          strokeWidth="2"
+          strokeDasharray="6 4"
+        />
+        <circle
+          cx={shape.x + shape.radius}
+          cy={shape.y}
+          r="8"
+          fill="#fff"
+          stroke="#3d63ff"
+          strokeWidth="3"
+        />
+      </g>
+    );
+  }
+
+  const box = getSelectionBox(shape);
+  const rotateHandle = { x: box.cx, y: box.y - 28 };
+
+  return (
+    <g>
+      <rect
+        x={box.x}
+        y={box.y}
+        width={box.width}
+        height={box.height}
+        fill="none"
+        stroke="#79a6ff"
+        strokeWidth="2"
+        strokeDasharray="6 4"
+      />
+      <circle
+        cx={box.x + box.width}
+        cy={box.y + box.height}
+        r="8"
+        fill="#fff"
+        stroke="#3d63ff"
+        strokeWidth="3"
+      />
+      <line
+        x1={box.cx}
+        y1={box.y}
+        x2={rotateHandle.x}
+        y2={rotateHandle.y}
+        stroke="#79a6ff"
+        strokeWidth="2"
+      />
+      <circle
+        cx={rotateHandle.x}
+        cy={rotateHandle.y}
+        r="8"
+        fill="#fff"
+        stroke="#3d63ff"
+        strokeWidth="3"
+      />
+    </g>
+  );
+}
+
+function transformShape(shape: Shape, interaction: InteractionState, point: { x: number; y: number }): Shape {
+  const start = interaction.startPointer;
+  const dx = point.x - start.x;
+  const dy = point.y - start.y;
+  const initial = interaction.initialShape;
+
+  if (interaction.mode === "move") {
+    if (shape.type === "line" || shape.type === "cable") {
+      const s = initial as LineShape;
+      return {
+        ...shape,
+        x: s.x + dx,
+        y: s.y + dy,
+        x2: s.x2 + dx,
+        y2: s.y2 + dy,
+      };
+    }
+
+    if (shape.type === "circle") {
+      const s = initial as CircleShape;
+      return {
+        ...shape,
+        x: s.x + dx,
+        y: s.y + dy,
+      };
+    }
+
+    if (shape.type === "rectangle") {
+      const s = initial as RectangleShape;
+      return {
+        ...shape,
+        x: s.x + dx,
+        y: s.y + dy,
+      };
+    }
+
+    const s = initial as SocketShape | SwitchShape;
+    return {
+      ...shape,
+      x: s.x + dx,
+      y: s.y + dy,
+    };
+  }
+
+  if (interaction.mode === "line-start" && (shape.type === "line" || shape.type === "cable")) {
+    return {
+      ...shape,
+      x: point.x,
+      y: point.y,
+    };
+  }
+
+  if (interaction.mode === "line-end" && (shape.type === "line" || shape.type === "cable")) {
+    return {
+      ...shape,
+      x2: point.x,
+      y2: point.y,
+    };
+  }
+
+  if (interaction.mode === "resize-circle" && shape.type === "circle") {
+    return {
+      ...shape,
+      radius: Math.max(10, distance(shape.x, shape.y, point.x, point.y)),
+    };
+  }
+
+  if (interaction.mode === "resize-se") {
+    if (shape.type === "rectangle") {
+      const s = initial as RectangleShape;
+      return {
+        ...shape,
+        width: Math.max(20, s.width + dx),
+        height: Math.max(20, s.height + dy),
+      };
+    }
+
+    if (shape.type === "socket" || shape.type === "switch") {
+      const s = initial as SocketShape | SwitchShape;
+      return {
+        ...shape,
+        width: Math.max(16, s.width + dx),
+        height: Math.max(16, s.height + dy),
+      };
+    }
+  }
+
+  if (interaction.mode === "rotate") {
+    if (shape.type === "rectangle") {
+      const s = initial as RectangleShape;
+      const cx = s.x + s.width / 2;
+      const cy = s.y + s.height / 2;
+      return {
+        ...shape,
+        rotation: angleDeg(cx, cy, point.x, point.y) + 90,
+      };
+    }
+
+    if (shape.type === "socket" || shape.type === "switch") {
+      const s = initial as SocketShape | SwitchShape;
+      return {
+        ...shape,
+        rotation: angleDeg(s.x, s.y, point.x, point.y) + 90,
+      };
+    }
+  }
+
+  return shape;
+}
+
+function hitTestHandle(px: number, py: number, shape: Shape): HandleType | null {
+  if (shape.type === "line" || shape.type === "cable") {
+    const midX = (shape.x + shape.x2) / 2;
+    const midY = (shape.y + shape.y2) / 2;
+
+    if (distance(px, py, shape.x, shape.y) <= 12) return "line-start";
+    if (distance(px, py, shape.x2, shape.y2) <= 12) return "line-end";
+    if (distance(px, py, midX, midY) <= 12) return "move";
+    return null;
+  }
+
+  if (shape.type === "circle") {
+    if (distance(px, py, shape.x + shape.radius, shape.y) <= 12) return "resize-circle";
+    return null;
+  }
+
+  const box = getSelectionBox(shape);
+  const rotateHandle = { x: box.cx, y: box.y - 28 };
+  const resizeHandle = { x: box.x + box.width, y: box.y + box.height };
+
+  if (distance(px, py, rotateHandle.x, rotateHandle.y) <= 12) return "rotate";
+  if (distance(px, py, resizeHandle.x, resizeHandle.y) <= 12) return "resize-se";
+
+  return null;
+}
+
+function getSelectionBox(shape: RectangleShape | SocketShape | SwitchShape) {
+  if (shape.type === "rectangle") {
+    return {
+      x: shape.x,
+      y: shape.y,
+      width: shape.width,
+      height: shape.height,
+      cx: shape.x + shape.width / 2,
+      cy: shape.y + shape.height / 2,
+    };
+  }
+
+  return {
+    x: shape.x - shape.width / 2,
+    y: shape.y - shape.height / 2,
+    width: shape.width,
+    height: shape.height,
+    cx: shape.x,
+    cy: shape.y,
+  };
 }
 
 function buildEstimate(shapes: Shape[], metersPerPixel: number): EstimateRow[] {
@@ -1029,6 +1270,10 @@ function distance(x1: number, y1: number, x2: number, y2: number) {
   return Math.hypot(x2 - x1, y2 - y1);
 }
 
+function angleDeg(cx: number, cy: number, px: number, py: number) {
+  return (Math.atan2(py - cy, px - cx) * 180) / Math.PI;
+}
+
 function distancePointToSegment(
   px: number,
   py: number,
@@ -1049,12 +1294,34 @@ function distancePointToSegment(
   return distance(px, py, projX, projY);
 }
 
+function hexToRgba(hex: string, opacity: number) {
+  const safe = safeColor(hex).replace("#", "");
+  const normalized = safe.length === 3
+    ? safe.split("").map((c) => c + c).join("")
+    : safe;
+
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+}
+
+function safeColor(value: string) {
+  if (/^#[0-9a-fA-F]{6}$/.test(value)) return value;
+  return "#4b70ff";
+}
+
 function slugify(value: string) {
   return value
     .toLowerCase()
     .replace(/\s+/g, "-")
     .replace(/[^a-z0-9а-яё_-]+/gi, "")
     .replace(/-+/g, "-");
+}
+
+function cloneShape<T extends Shape>(shape: T): T {
+  return JSON.parse(JSON.stringify(shape));
 }
 
 const styles: Record<string, React.CSSProperties> = {
@@ -1110,6 +1377,14 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 10,
     padding: "10px 12px",
     cursor: "pointer",
+  },
+  btnDisabled: {
+    background: "#151b33",
+    color: "#68749b",
+    border: "1px solid #2a3153",
+    borderRadius: 10,
+    padding: "10px 12px",
+    cursor: "not-allowed",
   },
   fileLabel: {
     background: "#1a234a",
@@ -1221,5 +1496,30 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #26305b",
     borderRadius: 10,
     padding: 10,
+  },
+  styleModal: {
+    position: "absolute",
+    top: 20,
+    right: 20,
+    width: 260,
+    background: "#121937",
+    border: "1px solid #33407a",
+    borderRadius: 14,
+    padding: 14,
+    zIndex: 30,
+    boxShadow: "0 10px 30px rgba(0,0,0,.35)",
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: 700,
+    marginBottom: 10,
+  },
+  colorInput: {
+    width: "100%",
+    height: 42,
+    background: "#0c1330",
+    border: "1px solid #2a376f",
+    borderRadius: 10,
+    padding: 4,
   },
 };
