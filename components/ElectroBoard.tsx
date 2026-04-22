@@ -1,605 +1,822 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { v4 as uuid } from "uuid";
-import { bucketName, supabase } from "@/lib/supabase";
-import { buildEstimate, distance, getLinkedCableId } from "@/lib/utils";
-import type { Calibration, LineShape, ProjectData, Shape, Tool } from "@/lib/types";
+import React, { useMemo, useRef, useState } from "react";
 
-const CANVAS_WIDTH = 1600;
-const CANVAS_HEIGHT = 1000;
+type Tool =
+  | "select"
+  | "rectangle"
+  | "circle"
+  | "line"
+  | "cable"
+  | "socket"
+  | "switch"
+  | "calibrate";
 
-const defaultCalibration: Calibration = {
-  pixelsPerMeter: 0,
-  pointA: null,
-  pointB: null,
-  realDistanceMeters: 1
+type BaseShape = {
+  id: string;
+  type: "rectangle" | "circle" | "line" | "cable" | "socket" | "switch";
+  label: string;
+  groupName?: string;
+  cableType?: string;
 };
 
-const defaultProject: ProjectData = {
-  name: "Новый проект",
-  shapes: [],
-  calibration: defaultCalibration,
-  canvasWidth: CANVAS_WIDTH,
-  canvasHeight: CANVAS_HEIGHT,
-  planUrl: null,
-  planPath: null,
-  planMimeType: null
+type RectangleShape = BaseShape & {
+  type: "rectangle";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 };
+
+type CircleShape = BaseShape & {
+  type: "circle";
+  x: number;
+  y: number;
+  radius: number;
+};
+
+type LineShape = BaseShape & {
+  type: "line" | "cable";
+  x: number;
+  y: number;
+  x2: number;
+  y2: number;
+};
+
+type SocketShape = BaseShape & {
+  type: "socket";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type SwitchShape = BaseShape & {
+  type: "switch";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type Shape =
+  | RectangleShape
+  | CircleShape
+  | LineShape
+  | SocketShape
+  | SwitchShape;
+
+type CalibrationPoint = {
+  x: number;
+  y: number;
+};
+
+type EstimateRow = {
+  groupName: string;
+  cableType: string;
+  meters: number;
+};
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+const SUPABASE_BUCKET = process.env.NEXT_PUBLIC_SUPABASE_BUCKET || "plans";
 
 export default function ElectroBoard() {
-  const [project, setProject] = useState<ProjectData>(defaultProject);
-  const [tool, setTool] = useState<Tool>("select");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [draftLine, setDraftLine] = useState<{ x: number; y: number; x2: number; y2: number } | null>(null);
-  const [dragOffset, setDragOffset] = useState<{ dx: number; dy: number } | null>(null);
-  const [status, setStatus] = useState("Готово");
-  const [projectSlug, setProjectSlug] = useState("");
-  const [loadingProject, setLoadingProject] = useState(false);
-
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const selected = project.shapes.find((s) => s.id === selectedId) || null;
+  const [projectId] = useState<string>(() => crypto.randomUUID());
+  const [projectName, setProjectName] = useState("Новый проект");
+  const [tool, setTool] = useState<Tool>("select");
+  const [shapes, setShapes] = useState<Shape[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [draftLine, setDraftLine] = useState<LineShape | null>(null);
+  const [dragOffset, setDragOffset] = useState<{ dx: number; dy: number } | null>(null);
+  const [calibrationPoints, setCalibrationPoints] = useState<CalibrationPoint[]>([]);
+  const [metersPerPixel, setMetersPerPixel] = useState<number>(0);
+  const [calibrationDistanceMeters, setCalibrationDistanceMeters] = useState<string>("1");
+  const [planUrl, setPlanUrl] = useState<string>("");
+  const [planPath, setPlanPath] = useState<string>("");
+  const [planMime, setPlanMime] = useState<string>("");
+  const [status, setStatus] = useState<string>("Готово");
+  const [canvasSize] = useState({ width: 1400, height: 900 });
 
-  const estimateRows = useMemo(() => buildEstimate(project), [project]);
-  const deviceLinks = useMemo(() => {
-    return project.shapes
-      .filter((s) => s.type === "socket" || s.type === "switch")
-      .map((device) => ({
-        deviceId: device.id,
-        label: device.label || (device.type === "socket" ? "Розетка" : "Выключатель"),
-        groupName: device.groupName || "Без группы",
-        cableId: getLinkedCableId(device, project.shapes)
-      }));
-  }, [project.shapes]);
+  const selectedShape = useMemo(
+    () => shapes.find((s) => s.id === selectedId) || null,
+    [shapes, selectedId]
+  );
 
-  useEffect(() => {
-    const saved = localStorage.getItem("electroboard-local");
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as ProjectData;
-        setProject({ ...defaultProject, ...parsed });
-        setProjectSlug(parsed.id || "");
-      } catch {
-        // ignore broken local cache
-      }
-    }
-  }, []);
+  const estimate = useMemo(() => buildEstimate(shapes, metersPerPixel), [shapes, metersPerPixel]);
 
-  useEffect(() => {
-    localStorage.setItem("electroboard-local", JSON.stringify(project));
-  }, [project]);
-
-  async function toBackgroundUrl(file: File) {
-    if (file.type === "application/pdf") {
-      const pdfjsLib = await import("pdfjs-dist");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
-      const bytes = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
-      const page = await pdf.getPage(1);
-      const viewport = page.getViewport({ scale: 1.6 });
-      const canvas = document.createElement("canvas");
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("Canvas context недоступен");
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      await page.render({ canvasContext: context, viewport }).promise;
-      return canvas.toDataURL("image/png");
-    }
-    return URL.createObjectURL(file);
+  function setShapePatch(id: string, patch: Partial<Shape>) {
+    setShapes((prev) => prev.map((s) => (s.id === id ? ({ ...s, ...patch } as Shape) : s)));
   }
 
-  async function handlePlanUpload(file: File) {
-    try {
-      setStatus("Обрабатываю план...");
-      const previewUrl = await toBackgroundUrl(file);
-
-      let planPath: string | null = null;
-      let publicUrl: string | null = previewUrl;
-
-      if (supabase) {
-        const ext = file.name.split(".").pop() || "bin";
-        const filename = `plans/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-        const uploaded = await supabase.storage.from(bucketName).upload(filename, file, {
-          upsert: true,
-          contentType: file.type
-        });
-        if (uploaded.error) throw uploaded.error;
-        planPath = uploaded.data.path;
-        const pub = supabase.storage.from(bucketName).getPublicUrl(filename);
-        publicUrl = file.type === "application/pdf" ? previewUrl : pub.data.publicUrl;
-      }
-
-      setProject((prev) => ({
-        ...prev,
-        planUrl: publicUrl,
-        planPath,
-        planMimeType: file.type
-      }));
-      setStatus("План загружен");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Ошибка загрузки плана");
-    }
-  }
-
-  function getPoint(evt: React.PointerEvent<SVGSVGElement>) {
+  function getSvgPoint(clientX: number, clientY: number) {
     const svg = svgRef.current;
     if (!svg) return { x: 0, y: 0 };
+
     const rect = svg.getBoundingClientRect();
-    const scaleX = CANVAS_WIDTH / rect.width;
-    const scaleY = CANVAS_HEIGHT / rect.height;
-    return {
-      x: (evt.clientX - rect.left) * scaleX,
-      y: (evt.clientY - rect.top) * scaleY
-    };
+    const x = ((clientX - rect.left) / rect.width) * canvasSize.width;
+    const y = ((clientY - rect.top) / rect.height) * canvasSize.height;
+
+    return { x, y };
   }
 
-  function updateShape(id: string, patch: Partial<Shape>) {
-    setProject((prev) => ({
-      ...prev,
-      shapes: prev.shapes.map((shape) => (shape.id === id ? ({ ...shape, ...patch } as Shape) : shape))
-    }));
-  }
+  function handleCanvasMouseDown(e: React.MouseEvent<SVGSVGElement>) {
+    const point = getSvgPoint(e.clientX, e.clientY);
 
-  function onCanvasPointerDown(evt: React.PointerEvent<SVGSVGElement>) {
-    const p = getPoint(evt);
+    if (tool === "calibrate") {
+      const next = [...calibrationPoints, point].slice(-2);
+      setCalibrationPoints(next);
+
+      if (next.length === 2) {
+        const px = distance(next[0].x, next[0].y, next[1].x, next[1].y);
+        const meters = Number(calibrationDistanceMeters);
+
+        if (px > 0 && meters > 0) {
+          setMetersPerPixel(meters / px);
+          setStatus(`Масштаб задан: ${meters.toFixed(2)} м на ${px.toFixed(0)} px`);
+        } else {
+          setStatus("Не удалось задать масштаб");
+        }
+      }
+      return;
+    }
+
+    if (tool === "select") {
+      const hit = [...shapes].reverse().find((shape) => isPointOnShape(point.x, point.y, shape));
+
+      if (hit) {
+        setSelectedId(hit.id);
+
+        if (hit.type !== "line" && hit.type !== "cable") {
+          setDragOffset({ dx: point.x - hit.x, dy: point.y - hit.y });
+        } else {
+          setDragOffset({ dx: point.x - hit.x, dy: point.y - hit.y });
+        }
+      } else {
+        setSelectedId(null);
+        setDragOffset(null);
+      }
+      return;
+    }
 
     if (tool === "rectangle") {
-      const shape: Shape = {
-        id: uuid(),
+      const shape: RectangleShape = {
+        id: crypto.randomUUID(),
         type: "rectangle",
-        x: p.x,
-        y: p.y,
+        x: point.x,
+        y: point.y,
         width: 140,
         height: 80,
         label: "Прямоугольник",
-        groupName: "",
-        cableType: ""
       };
-      setProject((prev) => ({ ...prev, shapes: [...prev.shapes, shape] }));
+      setShapes((prev) => [...prev, shape]);
       setSelectedId(shape.id);
       return;
     }
 
     if (tool === "circle") {
-      const shape: Shape = {
-        id: uuid(),
+      const shape: CircleShape = {
+        id: crypto.randomUUID(),
         type: "circle",
-        x: p.x,
-        y: p.y,
+        x: point.x,
+        y: point.y,
         radius: 40,
         label: "Окружность",
-        groupName: "",
-        cableType: ""
       };
-      setProject((prev) => ({ ...prev, shapes: [...prev.shapes, shape] }));
+      setShapes((prev) => [...prev, shape]);
       setSelectedId(shape.id);
       return;
     }
 
-    if (tool === "socket" || tool === "switch") {
-      const shape: Shape = {
-        id: uuid(),
-        type: tool,
-        x: p.x,
-        y: p.y,
-        width: 44,
-        height: 44,
-        label: tool === "socket" ? "Розетка" : "Выключатель",
+    if (tool === "socket") {
+      const shape: SocketShape = {
+        id: crypto.randomUUID(),
+        type: "socket",
+        x: point.x,
+        y: point.y,
+        width: 36,
+        height: 36,
+        label: "Розетка",
         groupName: "",
-        cableType: ""
       };
-      setProject((prev) => ({ ...prev, shapes: [...prev.shapes, shape] }));
+      setShapes((prev) => [...prev, shape]);
+      setSelectedId(shape.id);
+      return;
+    }
+
+    if (tool === "switch") {
+      const shape: SwitchShape = {
+        id: crypto.randomUUID(),
+        type: "switch",
+        x: point.x,
+        y: point.y,
+        width: 36,
+        height: 36,
+        label: "Выключатель",
+        groupName: "",
+      };
+      setShapes((prev) => [...prev, shape]);
       setSelectedId(shape.id);
       return;
     }
 
     if (tool === "line" || tool === "cable") {
-      setDraftLine({ x: p.x, y: p.y, x2: p.x, y2: p.y });
-      return;
-    }
-
-    if (tool === "calibrate") {
-      setProject((prev) => {
-        const hasFirst = prev.calibration.pointA && !prev.calibration.pointB;
-        if (!prev.calibration.pointA || !hasFirst) {
-          return {
-            ...prev,
-            calibration: { ...prev.calibration, pointA: p, pointB: null }
-          };
-        }
-        return {
-          ...prev,
-          calibration: { ...prev.calibration, pointB: p }
-        };
-      });
-      return;
-    }
-
-    if (tool === "select") {
-      const hit = [...project.shapes].reverse().find((shape) => isPointOnShape(p.x, p.y, shape));
-      setSelectedId(hit?.id ?? null);
-      if (hit) setDragOffset({ dx: p.x - hit.x, dy: p.y - hit.y });
-    }
-  }
-
-  function onCanvasPointerMove(evt: React.PointerEvent<SVGSVGElement>) {
-    const p = getPoint(evt);
-    if (draftLine) {
-      setDraftLine((prev) => (prev ? { ...prev, x2: p.x, y2: p.y } : null));
-      return;
-    }
-    if (tool === "select" && selectedId && dragOffset) {
-      updateShape(selectedId, { x: p.x - dragOffset.dx, y: p.y - dragOffset.dy });
-    }
-  }
-
-  function onCanvasPointerUp() {
-    if (draftLine && (tool === "line" || tool === "cable")) {
-      const line: Shape = {
-        id: uuid(),
+      const shape: LineShape = {
+        id: crypto.randomUUID(),
         type: tool,
-        x: draftLine.x,
-        y: draftLine.y,
-        x2: draftLine.x2,
-        y2: draftLine.y2,
+        x: point.x,
+        y: point.y,
+        x2: point.x + 1,
+        y2: point.y + 1,
         label: tool === "cable" ? "Кабель" : "Линия",
         groupName: "",
-        cableType: tool === "cable" ? "ВВГнг-LS 3x2.5" : "",
+        cableType: tool === "cable" ? "ВВГнг 3x2.5" : "",
       };
-      setProject((prev) => ({ ...prev, shapes: [...prev.shapes, line] }));
-      setSelectedId(line.id);
+      setDraftLine(shape);
+      setSelectedId(shape.id);
     }
-    setDraftLine(null);
+  }
+
+  function handleCanvasMouseMove(e: React.MouseEvent<SVGSVGElement>) {
+    const point = getSvgPoint(e.clientX, e.clientY);
+
+    if (draftLine) {
+      setDraftLine((prev) => (prev ? { ...prev, x2: point.x, y2: point.y } : null));
+      return;
+    }
+
+    if (tool === "select" && selectedShape && dragOffset) {
+      setShapes((prev) =>
+        prev.map((shape) => {
+          if (shape.id !== selectedShape.id) return shape;
+
+          if (shape.type === "line" || shape.type === "cable") {
+            const dx = point.x - dragOffset.dx - shape.x;
+            const dy = point.y - dragOffset.dy - shape.y;
+            return {
+              ...shape,
+              x: shape.x + dx,
+              y: shape.y + dy,
+              x2: shape.x2 + dx,
+              y2: shape.y2 + dy,
+            };
+          }
+
+          if (shape.type === "circle") {
+            return {
+              ...shape,
+              x: point.x - dragOffset.dx,
+              y: point.y - dragOffset.dy,
+            };
+          }
+
+          return {
+            ...shape,
+            x: point.x - dragOffset.dx,
+            y: point.y - dragOffset.dy,
+          };
+        })
+      );
+    }
+  }
+
+  function handleCanvasMouseUp() {
+    if (draftLine) {
+      setShapes((prev) => [...prev, draftLine]);
+      setDraftLine(null);
+      setTool("select");
+    }
     setDragOffset(null);
   }
 
-  function applyCalibration() {
-    setProject((prev) => {
-      const { pointA, pointB, realDistanceMeters } = prev.calibration;
-      if (!pointA || !pointB || !realDistanceMeters) return prev;
-      const px = distance(pointA.x, pointA.y, pointB.x, pointB.y);
-      const ppm = px / realDistanceMeters;
-      return { ...prev, calibration: { ...prev.calibration, pixelsPerMeter: ppm } };
-    });
+  function deleteSelected() {
+    if (!selectedId) return;
+    setShapes((prev) => prev.filter((s) => s.id !== selectedId));
+    setSelectedId(null);
+  }
+
+  function clearAll() {
+    setShapes([]);
+    setSelectedId(null);
+    setDraftLine(null);
+    setCalibrationPoints([]);
+    setStatus("Холст очищен");
+  }
+
+  async function handlePlanUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setStatus("Загрузка плана...");
+
+    const localUrl = URL.createObjectURL(file);
+    setPlanUrl(localUrl);
+    setPlanMime(file.type);
+
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      setStatus("Файл открыт локально. Supabase ключи не заданы.");
+      return;
+    }
+
+    try {
+      const ext = file.name.split(".").pop() || "bin";
+      const objectPath = `plans/${projectId}-${Date.now()}.${ext}`;
+
+      const uploadRes = await fetch(
+        `${SUPABASE_URL}/storage/v1/object/${SUPABASE_BUCKET}/${objectPath}`,
+        {
+          method: "POST",
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+            "x-upsert": "true",
+            "Content-Type": file.type || "application/octet-stream",
+          },
+          body: file,
+        }
+      );
+
+      if (!uploadRes.ok) {
+        const txt = await uploadRes.text();
+        throw new Error(txt || "Ошибка загрузки файла");
+      }
+
+      const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${SUPABASE_BUCKET}/${objectPath}`;
+      setPlanPath(objectPath);
+      setPlanUrl(publicUrl);
+      setStatus("План загружен");
+    } catch (error) {
+      console.error(error);
+      setStatus("Файл загружен локально, но не сохранён в Storage");
+    }
   }
 
   async function saveProject() {
-    if (!supabase) {
-      setStatus("Нет подключения к Supabase. Локальное сохранение уже работает в браузере.");
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      setStatus("Не заданы переменные окружения Supabase");
       return;
     }
-    try {
-      setStatus("Сохраняю проект...");
-      const payload = {
-        name: project.name,
-        data: project,
-        plan_path: project.planPath,
-        plan_mime_type: project.planMimeType
-      };
 
-      if (projectSlug) {
-        const updated = await supabase.from("projects").update(payload).eq("id", projectSlug).select("id").single();
-        if (updated.error) throw updated.error;
-      } else {
-        const inserted = await supabase.from("projects").insert(payload).select("id").single();
-        if (inserted.error) throw inserted.error;
-        setProjectSlug(inserted.data.id);
-        setProject((prev) => ({ ...prev, id: inserted.data.id }));
+    setStatus("Сохранение проекта...");
+
+    const payload = {
+      id: projectId,
+      name: projectName,
+      plan_path: planPath || null,
+      data: {
+        shapes,
+        metersPerPixel,
+        calibrationPoints,
+        estimate,
+        planUrl,
+        planMime,
+      },
+    };
+
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/projects`, {
+        method: "POST",
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates,return=representation",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || "Не удалось сохранить проект");
       }
+
       setStatus("Проект сохранён в Supabase");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Ошибка сохранения");
+      console.error(error);
+      setStatus("Ошибка сохранения проекта");
     }
   }
 
-  async function loadProject() {
-    if (!supabase || !projectSlug.trim()) {
-      setStatus("Укажите ID проекта и проверьте переменные Supabase");
-      return;
-    }
-    try {
-      setLoadingProject(true);
-      setStatus("Загружаю проект...");
-      const response = await supabase.from("projects").select("id,name,data").eq("id", projectSlug.trim()).single();
-      if (response.error) throw response.error;
-      const data = response.data.data as ProjectData;
-      setProject({ ...defaultProject, ...data, id: response.data.id, name: response.data.name || data.name });
-      setSelectedId(null);
-      setStatus("Проект загружен");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Ошибка загрузки");
-    } finally {
-      setLoadingProject(false);
-    }
+  function exportJson() {
+    const blob = new Blob(
+      [
+        JSON.stringify(
+          {
+            projectId,
+            projectName,
+            planPath,
+            planUrl,
+            planMime,
+            metersPerPixel,
+            calibrationPoints,
+            shapes,
+            estimate,
+          },
+          null,
+          2
+        ),
+      ],
+      { type: "application/json" }
+    );
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${slugify(projectName || "project")}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
-  function resetProject() {
-    setProject(defaultProject);
-    setSelectedId(null);
-    setDraftLine(null);
-    setProjectSlug("");
-    setStatus("Создан новый пустой проект");
+  function importJson(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        setProjectName(parsed.projectName || "Импортированный проект");
+        setPlanPath(parsed.planPath || "");
+        setPlanUrl(parsed.planUrl || "");
+        setPlanMime(parsed.planMime || "");
+        setCalibrationPoints(parsed.calibrationPoints || []);
+        setMetersPerPixel(parsed.metersPerPixel || 0);
+        setShapes(parsed.shapes || []);
+        setSelectedId(null);
+        setStatus("JSON импортирован");
+      } catch (error) {
+        console.error(error);
+        setStatus("Не удалось импортировать JSON");
+      }
+    };
+    reader.readAsText(file);
   }
 
   return (
-    <div className="page">
-      <div className="topbar">
-        <span className="badge">ElectroBoard MVP</span>
-        <div className="field" style={{ margin: 0, minWidth: 240 }}>
-          <label>Название проекта</label>
-          <input value={project.name} onChange={(e) => setProject((p) => ({ ...p, name: e.target.value }))} />
+    <div style={styles.page}>
+      <div style={styles.topbar}>
+        <div style={styles.leftBlock}>
+          <input
+            value={projectName}
+            onChange={(e) => setProjectName(e.target.value)}
+            style={styles.projectInput}
+            placeholder="Название проекта"
+          />
+          <button style={tool === "select" ? styles.btnActive : styles.btn} onClick={() => setTool("select")}>
+            Выбор
+          </button>
+          <button style={tool === "rectangle" ? styles.btnActive : styles.btn} onClick={() => setTool("rectangle")}>
+            Прямоугольник
+          </button>
+          <button style={tool === "circle" ? styles.btnActive : styles.btn} onClick={() => setTool("circle")}>
+            Окружность
+          </button>
+          <button style={tool === "line" ? styles.btnActive : styles.btn} onClick={() => setTool("line")}>
+            Линия
+          </button>
+          <button style={tool === "cable" ? styles.btnActive : styles.btn} onClick={() => setTool("cable")}>
+            Кабель
+          </button>
+          <button style={tool === "socket" ? styles.btnActive : styles.btn} onClick={() => setTool("socket")}>
+            Розетка
+          </button>
+          <button style={tool === "switch" ? styles.btnActive : styles.btn} onClick={() => setTool("switch")}>
+            Выключатель
+          </button>
+          <button style={tool === "calibrate" ? styles.btnActive : styles.btn} onClick={() => setTool("calibrate")}>
+            Масштаб
+          </button>
         </div>
-        <button className="primary" onClick={saveProject}>Сохранить в Supabase</button>
-        <div className="field" style={{ margin: 0, minWidth: 220 }}>
-          <label>ID проекта</label>
-          <input value={projectSlug} onChange={(e) => setProjectSlug(e.target.value)} placeholder="появится после сохранения" />
+
+        <div style={styles.leftBlock}>
+          <label style={styles.fileLabel}>
+            План
+            <input type="file" accept=".png,.jpg,.jpeg,.pdf" onChange={handlePlanUpload} style={{ display: "none" }} />
+          </label>
+          <button style={styles.btn} onClick={saveProject}>
+            Сохранить
+          </button>
+          <button style={styles.btn} onClick={exportJson}>
+            Экспорт JSON
+          </button>
+          <label style={styles.fileLabel}>
+            Импорт JSON
+            <input type="file" accept=".json" onChange={importJson} style={{ display: "none" }} />
+          </label>
+          <button style={styles.btnDanger} onClick={deleteSelected}>
+            Удалить
+          </button>
+          <button style={styles.btnDanger} onClick={clearAll}>
+            Очистить
+          </button>
         </div>
-        <button className="secondary" onClick={loadProject} disabled={loadingProject}>Загрузить</button>
-        <button className="secondary" onClick={() => localStorage.setItem("electroboard-export", JSON.stringify(project))}>Экспорт в localStorage</button>
-        <button className="danger" onClick={resetProject}>Новый проект</button>
-        <span className="muted">{status}</span>
       </div>
 
-      <div className="layout">
-        <aside className="panel">
-          <div className="section">
-            <h3>Инструменты</h3>
-            <div className="toolbox">
-              {[
-                ["select", "Выбор"],
-                ["rectangle", "Прямоугольник"],
-                ["circle", "Окружность"],
-                ["line", "Линия"],
-                ["cable", "Кабель"],
-                ["socket", "Розетка"],
-                ["switch", "Выключатель"],
-                ["calibrate", "Калибровка"]
-              ].map(([value, title]) => (
-                <button
-                  key={value}
-                  className={`toolbtn ${tool === value ? "active" : ""}`}
-                  onClick={() => setTool(value as Tool)}
-                >
-                  {title}
-                </button>
-              ))}
-            </div>
+      <div style={styles.main}>
+        <div style={styles.canvasWrap}>
+          <div style={styles.statusBar}>
+            <span>{status}</span>
+            <span>
+              Масштаб:{" "}
+              {metersPerPixel > 0 ? `${metersPerPixel.toFixed(5)} м / px` : "не задан"}
+            </span>
           </div>
 
-          <div className="section">
-            <h3>План помещения</h3>
-            <div className="field">
-              <label>Файл JPG / PNG / PDF</label>
-              <input
-                ref={inputRef}
-                type="file"
-                accept="image/*,.pdf"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) handlePlanUpload(file);
-                }}
-              />
-            </div>
-            <p className="muted">
-              Для PDF в фоне показывается первая страница. Сам оригинальный файл тоже можно хранить в Supabase Storage.
-            </p>
-          </div>
-
-          <div className="section">
-            <h3>Масштаб</h3>
-            <div className="field">
-              <label>Реальный размер между 2 точками, м</label>
-              <input
-                type="number"
-                min="0.1"
-                step="0.1"
-                value={project.calibration.realDistanceMeters}
-                onChange={(e) =>
-                  setProject((prev) => ({
-                    ...prev,
-                    calibration: { ...prev.calibration, realDistanceMeters: Number(e.target.value) || 1 }
-                  }))
-                }
-              />
-            </div>
-            <button className="secondary" onClick={applyCalibration}>Применить калибровку</button>
-            <p className="muted">
-              Выберите инструмент “Калибровка”, поставьте две точки на плане, затем нажмите кнопку.
-            </p>
-            <div className="card">
-              <div className="kv"><span>pixelsPerMeter</span><strong>{project.calibration.pixelsPerMeter.toFixed(2)}</strong></div>
-              <div className="kv"><span>Точка A</span><strong>{project.calibration.pointA ? "есть" : "нет"}</strong></div>
-              <div className="kv"><span>Точка B</span><strong>{project.calibration.pointB ? "есть" : "нет"}</strong></div>
-            </div>
-          </div>
-
-          <div className="section">
-            <h3>Подсказка</h3>
-            <p className="muted">
-              Длина кабеля считается только для объектов типа “Кабель”. Розетки и выключатели связываются с ближайшим кабелем той же группы.
-            </p>
-          </div>
-        </aside>
-
-        <main className="canvasWrap">
-          <div className="canvasInner">
-            {project.planUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img alt="План помещения" className="planImage" src={project.planUrl} />
+          <div style={styles.board}>
+            {planUrl ? (
+              planMime.includes("pdf") ? (
+                <iframe src={planUrl} style={styles.planFrame} />
+              ) : (
+                <img src={planUrl} alt="План" style={styles.planImage} />
+              )
             ) : null}
+
             <svg
               ref={svgRef}
-              className="planCanvas"
-              viewBox={`0 0 ${CANVAS_WIDTH} ${CANVAS_HEIGHT}`}
-              onPointerDown={onCanvasPointerDown}
-              onPointerMove={onCanvasPointerMove}
-              onPointerUp={onCanvasPointerUp}
-              onPointerLeave={onCanvasPointerUp}
+              viewBox={`0 0 ${canvasSize.width} ${canvasSize.height}`}
+              style={styles.svg}
+              onMouseDown={handleCanvasMouseDown}
+              onMouseMove={handleCanvasMouseMove}
+              onMouseUp={handleCanvasMouseUp}
             >
-              {project.calibration.pointA && (
-                <circle cx={project.calibration.pointA.x} cy={project.calibration.pointA.y} r="6" fill="#00e7a7" />
-              )}
-              {project.calibration.pointB && (
-                <circle cx={project.calibration.pointB.x} cy={project.calibration.pointB.y} r="6" fill="#00e7a7" />
-              )}
-              {project.calibration.pointA && project.calibration.pointB && (
+              <defs>
+                <pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse">
+                  <path d="M 25 0 L 0 0 0 25" fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="1" />
+                </pattern>
+              </defs>
+              <rect x="0" y="0" width={canvasSize.width} height={canvasSize.height} fill="url(#grid)" />
+
+              {shapes.map((shape) => renderShape(shape, selectedId === shape.id, shapes))}
+
+              {draftLine ? renderShape(draftLine, true, shapes) : null}
+
+              {calibrationPoints.map((p, i) => (
+                <g key={`${p.x}-${p.y}-${i}`}>
+                  <circle cx={p.x} cy={p.y} r="6" fill="#00e7a7" />
+                  <text x={p.x + 8} y={p.y - 8} fill="#fff" fontSize="14">
+                    T{i + 1}
+                  </text>
+                </g>
+              ))}
+
+              {calibrationPoints.length === 2 ? (
                 <line
-                  x1={project.calibration.pointA.x}
-                  y1={project.calibration.pointA.y}
-                  x2={project.calibration.pointB.x}
-                  y2={project.calibration.pointB.y}
+                  x1={calibrationPoints[0].x}
+                  y1={calibrationPoints[0].y}
+                  x2={calibrationPoints[1].x}
+                  y2={calibrationPoints[1].y}
                   stroke="#00e7a7"
                   strokeWidth="3"
-                  strokeDasharray="8 6"
                 />
-              )}
-
-              {project.shapes.map((shape) => renderShape(shape, shape.id === selectedId, project.shapes))}
-              {draftLine && (
-                <line
-                  x1={draftLine.x}
-                  y1={draftLine.y}
-                  x2={draftLine.x2}
-                  y2={draftLine.y2}
-                  stroke="#ffd34d"
-                  strokeWidth="4"
-                  strokeDasharray="10 8"
-                />
-              )}
+              ) : null}
             </svg>
           </div>
-        </main>
+        </div>
 
-        <aside className="panel right">
-          <div className="section">
-            <h3>Свойства объекта</h3>
-            {!selected ? (
-              <p className="empty">Выберите объект на холсте.</p>
+        <div style={styles.sidebar}>
+          <div style={styles.card}>
+            <div style={styles.cardTitle}>Калибровка</div>
+            <div style={styles.field}>
+              <label style={styles.label}>Реальное расстояние, м</label>
+              <input
+                value={calibrationDistanceMeters}
+                onChange={(e) => setCalibrationDistanceMeters(e.target.value)}
+                style={styles.input}
+                type="number"
+                step="0.01"
+              />
+            </div>
+            <div style={styles.hint}>
+              Выберите инструмент <b>Масштаб</b>, затем кликните по двум точкам на плане.
+            </div>
+          </div>
+
+          <div style={styles.card}>
+            <div style={styles.cardTitle}>Свойства объекта</div>
+
+            {!selectedShape ? (
+              <div style={styles.hint}>Ничего не выбрано</div>
             ) : (
-              <div>
-                <div className="field">
-                  <label>Название</label>
-                  <input value={selected.label} onChange={(e) => updateShape(selected.id, { label: e.target.value })} />
-                </div>
-                <div className="row">
-                  <div className="field" style={{ flex: 1 }}>
-                    <label>X</label>
-                    <input type="number" value={Math.round(selected.x)} onChange={(e) => updateShape(selected.id, { x: Number(e.target.value) })} />
-                  </div>
-                  <div className="field" style={{ flex: 1 }}>
-                    <label>Y</label>
-                    <input type="number" value={Math.round(selected.y)} onChange={(e) => updateShape(selected.id, { y: Number(e.target.value) })} />
-                  </div>
+              <>
+                <div style={styles.field}>
+                  <label style={styles.label}>Тип</label>
+                  <input value={selectedShape.type} readOnly style={styles.input} />
                 </div>
 
-                {"width" in selected && (
-                  <div className="row">
-                    <div className="field" style={{ flex: 1 }}>
-                      <label>Ширина</label>
-                      <input type="number" value={selected.width} onChange={(e) => updateShape(selected.id, { width: Number(e.target.value) } as Partial<Shape>)} />
-                    </div>
-                    <div className="field" style={{ flex: 1 }}>
-                      <label>Высота</label>
-                      <input type="number" value={selected.height} onChange={(e) => updateShape(selected.id, { height: Number(e.target.value) } as Partial<Shape>)} />
-                    </div>
-                  </div>
-                )}
-
-                {"radius" in selected && (
-                  <div className="field">
-                    <label>Радиус</label>
-                    <input type="number" value={selected.radius} onChange={(e) => updateShape(selected.id, { radius: Number(e.target.value) } as Partial<Shape>)} />
-                  </div>
-                )}
-
-                {"x2" in selected && (
-                  <div className="row">
-                    <div className="field" style={{ flex: 1 }}>
-                      <label>X2</label>
-                      <input type="number" value={Math.round(selected.x2)} onChange={(e) => updateShape(selected.id, { x2: Number(e.target.value) } as Partial<Shape>)} />
-                    </div>
-                    <div className="field" style={{ flex: 1 }}>
-                      <label>Y2</label>
-                      <input type="number" value={Math.round(selected.y2)} onChange={(e) => updateShape(selected.id, { y2: Number(e.target.value) } as Partial<Shape>)} />
-                    </div>
-                  </div>
-                )}
-
-                <div className="field">
-                  <label>Группа</label>
-                  <input value={selected.groupName} onChange={(e) => updateShape(selected.id, { groupName: e.target.value })} placeholder="A1, P1..." />
+                <div style={styles.field}>
+                  <label style={styles.label}>Название</label>
+                  <input
+                    value={selectedShape.label}
+                    onChange={(e) => setShapePatch(selectedShape.id, { label: e.target.value })}
+                    style={styles.input}
+                  />
                 </div>
-                {(selected.type === "cable" || selected.type === "line") && (
-                  <div className="field">
-                    <label>Тип кабеля</label>
-                    <input value={selected.cableType} onChange={(e) => updateShape(selected.id, { cableType: e.target.value })} placeholder="ВВГнг-LS 3x2.5" />
+
+                <div style={styles.field}>
+                  <label style={styles.label}>Группа</label>
+                  <input
+                    value={selectedShape.groupName || ""}
+                    onChange={(e) => setShapePatch(selectedShape.id, { groupName: e.target.value })}
+                    style={styles.input}
+                    placeholder="A1, P1..."
+                  />
+                </div>
+
+                {(selectedShape.type === "cable" || selectedShape.type === "line") ? (
+                  <div style={styles.field}>
+                    <label style={styles.label}>Тип кабеля</label>
+                    <input
+                      value={selectedShape.cableType || ""}
+                      onChange={(e) => setShapePatch(selectedShape.id, { cableType: e.target.value })}
+                      style={styles.input}
+                      placeholder="ВВГнг 3x2.5"
+                    />
                   </div>
+                ) : null}
+
+                {selectedShape.type === "rectangle" && (
+                  <>
+                    <div style={styles.field}>
+                      <label style={styles.label}>X</label>
+                      <input
+                        type="number"
+                        value={selectedShape.x}
+                        onChange={(e) => setShapePatch(selectedShape.id, { x: Number(e.target.value) })}
+                        style={styles.input}
+                      />
+                    </div>
+                    <div style={styles.field}>
+                      <label style={styles.label}>Y</label>
+                      <input
+                        type="number"
+                        value={selectedShape.y}
+                        onChange={(e) => setShapePatch(selectedShape.id, { y: Number(e.target.value) })}
+                        style={styles.input}
+                      />
+                    </div>
+                    <div style={styles.field}>
+                      <label style={styles.label}>Ширина</label>
+                      <input
+                        type="number"
+                        value={selectedShape.width}
+                        onChange={(e) => setShapePatch(selectedShape.id, { width: Number(e.target.value) })}
+                        style={styles.input}
+                      />
+                    </div>
+                    <div style={styles.field}>
+                      <label style={styles.label}>Высота</label>
+                      <input
+                        type="number"
+                        value={selectedShape.height}
+                        onChange={(e) => setShapePatch(selectedShape.id, { height: Number(e.target.value) })}
+                        style={styles.input}
+                      />
+                    </div>
+                  </>
                 )}
-                {selected.type === "cable" && (
-                  <div className="card small">
-                    Длина:{" "}
-                    <strong>
-                      {(project.calibration.pixelsPerMeter
-                        ? distance(selected.x, selected.y, selected.x2, selected.y2) / project.calibration.pixelsPerMeter
-                        : 0
-                      ).toFixed(2)} м
-                    </strong>
-                  </div>
+
+                {selectedShape.type === "circle" && (
+                  <>
+                    <div style={styles.field}>
+                      <label style={styles.label}>X</label>
+                      <input
+                        type="number"
+                        value={selectedShape.x}
+                        onChange={(e) => setShapePatch(selectedShape.id, { x: Number(e.target.value) })}
+                        style={styles.input}
+                      />
+                    </div>
+                    <div style={styles.field}>
+                      <label style={styles.label}>Y</label>
+                      <input
+                        type="number"
+                        value={selectedShape.y}
+                        onChange={(e) => setShapePatch(selectedShape.id, { y: Number(e.target.value) })}
+                        style={styles.input}
+                      />
+                    </div>
+                    <div style={styles.field}>
+                      <label style={styles.label}>Радиус</label>
+                      <input
+                        type="number"
+                        value={selectedShape.radius}
+                        onChange={(e) => setShapePatch(selectedShape.id, { radius: Number(e.target.value) })}
+                        style={styles.input}
+                      />
+                    </div>
+                  </>
                 )}
-                <button
-                  className="danger"
-                  onClick={() => {
-                    setProject((prev) => ({ ...prev, shapes: prev.shapes.filter((s) => s.id !== selected.id) }));
-                    setSelectedId(null);
-                  }}
-                >
-                  Удалить объект
-                </button>
-              </div>
+
+                {(selectedShape.type === "socket" || selectedShape.type === "switch") && (
+                  <>
+                    <div style={styles.field}>
+                      <label style={styles.label}>X</label>
+                      <input
+                        type="number"
+                        value={selectedShape.x}
+                        onChange={(e) => setShapePatch(selectedShape.id, { x: Number(e.target.value) })}
+                        style={styles.input}
+                      />
+                    </div>
+                    <div style={styles.field}>
+                      <label style={styles.label}>Y</label>
+                      <input
+                        type="number"
+                        value={selectedShape.y}
+                        onChange={(e) => setShapePatch(selectedShape.id, { y: Number(e.target.value) })}
+                        style={styles.input}
+                      />
+                    </div>
+                    <div style={styles.field}>
+                      <label style={styles.label}>Ширина</label>
+                      <input
+                        type="number"
+                        value={selectedShape.width}
+                        onChange={(e) => setShapePatch(selectedShape.id, { width: Number(e.target.value) })}
+                        style={styles.input}
+                      />
+                    </div>
+                    <div style={styles.field}>
+                      <label style={styles.label}>Высота</label>
+                      <input
+                        type="number"
+                        value={selectedShape.height}
+                        onChange={(e) => setShapePatch(selectedShape.id, { height: Number(e.target.value) })}
+                        style={styles.input}
+                      />
+                    </div>
+                    <div style={styles.hint}>
+                      Привязка к кабелю определяется автоматически по ближайшей кабельной линии той же группы.
+                    </div>
+                  </>
+                )}
+
+                {(selectedShape.type === "line" || selectedShape.type === "cable") && (
+                  <>
+                    <div style={styles.field}>
+                      <label style={styles.label}>X1</label>
+                      <input
+                        type="number"
+                        value={selectedShape.x}
+                        onChange={(e) => setShapePatch(selectedShape.id, { x: Number(e.target.value) })}
+                        style={styles.input}
+                      />
+                    </div>
+                    <div style={styles.field}>
+                      <label style={styles.label}>Y1</label>
+                      <input
+                        type="number"
+                        value={selectedShape.y}
+                        onChange={(e) => setShapePatch(selectedShape.id, { y: Number(e.target.value) })}
+                        style={styles.input}
+                      />
+                    </div>
+                    <div style={styles.field}>
+                      <label style={styles.label}>X2</label>
+                      <input
+                        type="number"
+                        value={selectedShape.x2}
+                        onChange={(e) => setShapePatch(selectedShape.id, { x2: Number(e.target.value) })}
+                        style={styles.input}
+                      />
+                    </div>
+                    <div style={styles.field}>
+                      <label style={styles.label}>Y2</label>
+                      <input
+                        type="number"
+                        value={selectedShape.y2}
+                        onChange={(e) => setShapePatch(selectedShape.id, { y2: Number(e.target.value) })}
+                        style={styles.input}
+                      />
+                    </div>
+                    <div style={styles.hint}>
+                      Длина: {lineLengthMeters(selectedShape, metersPerPixel).toFixed(2)} м
+                    </div>
+                  </>
+                )}
+              </>
             )}
           </div>
 
-          <div className="section">
-            <h3>Смета по кабелю</h3>
-            <div className="list">
-              {estimateRows.length ? (
-                estimateRows.map((row) => (
-                  <div key={`${row.groupName}-${row.cableType}`} className="card">
-                    <div><strong>{row.groupName}</strong></div>
-                    <div className="muted">{row.cableType}</div>
-                    <div className="kv"><span>Линий</span><strong>{row.lines}</strong></div>
-                    <div className="kv"><span>Метраж</span><strong>{row.totalMeters.toFixed(2)} м</strong></div>
+          <div style={styles.card}>
+            <div style={styles.cardTitle}>Смета кабеля</div>
+            {estimate.length === 0 ? (
+              <div style={styles.hint}>Нет кабельных линий</div>
+            ) : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {estimate.map((row, idx) => (
+                  <div key={`${row.groupName}-${row.cableType}-${idx}`} style={styles.estimateRow}>
+                    <div><b>{row.groupName || "Без группы"}</b></div>
+                    <div>{row.cableType || "Без типа"}</div>
+                    <div>{row.meters.toFixed(2)} м</div>
                   </div>
-                ))
-              ) : (
-                <p className="empty">Пока нет кабельных линий.</p>
-              )}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
-
-          <div className="section">
-            <h3>Привязка розеток и выключателей</h3>
-            <div className="list">
-              {deviceLinks.length ? (
-                deviceLinks.map((item) => (
-                  <div key={item.deviceId} className="card">
-                    <div><strong>{item.label}</strong></div>
-                    <div className="muted">Группа: {item.groupName}</div>
-                    <div className="muted">Кабель: {item.cableId || "не найден"}</div>
-                  </div>
-                ))
-              ) : (
-                <p className="empty">Нет устройств для привязки.</p>
-              )}
-            </div>
-          </div>
-
-          <p className="footerNote">
-            Масштабирование объектов в MVP сделано через панель свойств справа. Это проще и надёжнее для первого релиза.
-          </p>
-        </aside>
+        </div>
       </div>
     </div>
   );
@@ -608,13 +825,24 @@ export default function ElectroBoard() {
 function renderShape(shape: Shape, selected: boolean, allShapes: Shape[]) {
   const stroke = selected ? "#79a6ff" : "#d9e4ff";
   const strokeWidth = selected ? 3 : 2;
-  const labelY = shape.y - 12;
+  const labelY = ("radius" in shape ? shape.y - shape.radius - 10 : shape.y - 12);
 
   if (shape.type === "rectangle") {
     return (
       <g key={shape.id}>
-        <rect x={shape.x} y={shape.y} width={shape.width} height={shape.height} fill="rgba(75,112,255,.12)" stroke={stroke} strokeWidth={strokeWidth} rx="6" />
-        <text x={shape.x + 6} y={labelY} fill="#f2f6ff" fontSize="14">{shape.label}</text>
+        <rect
+          x={shape.x}
+          y={shape.y}
+          width={shape.width}
+          height={shape.height}
+          fill="rgba(75,112,255,.12)"
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+          rx="6"
+        />
+        <text x={shape.x + 6} y={labelY} fill="#f2f6ff" fontSize="14">
+          {shape.label}
+        </text>
       </g>
     );
   }
@@ -622,8 +850,17 @@ function renderShape(shape: Shape, selected: boolean, allShapes: Shape[]) {
   if (shape.type === "circle") {
     return (
       <g key={shape.id}>
-        <circle cx={shape.x} cy={shape.y} r={shape.radius} fill="rgba(75,112,255,.12)" stroke={stroke} strokeWidth={strokeWidth} />
-        <text x={shape.x + shape.radius + 6} y={labelY} fill="#f2f6ff" fontSize="14">{shape.label}</text>
+        <circle
+          cx={shape.x}
+          cy={shape.y}
+          r={shape.radius}
+          fill="rgba(75,112,255,.12)"
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+        />
+        <text x={shape.x + shape.radius + 6} y={labelY} fill="#f2f6ff" fontSize="14">
+          {shape.label}
+        </text>
       </g>
     );
   }
@@ -640,7 +877,12 @@ function renderShape(shape: Shape, selected: boolean, allShapes: Shape[]) {
           strokeWidth={shape.type === "cable" ? 4 : strokeWidth}
           strokeDasharray={shape.type === "cable" ? "0" : "9 7"}
         />
-        <text x={(shape.x + shape.x2) / 2 + 6} y={(shape.y + shape.y2) / 2 - 6} fill="#f2f6ff" fontSize="14">
+        <text
+          x={(shape.x + shape.x2) / 2 + 6}
+          y={(shape.y + shape.y2) / 2 - 6}
+          fill="#f2f6ff"
+          fontSize="14"
+        >
           {shape.label} {shape.groupName ? `(${shape.groupName})` : ""}
         </text>
       </g>
@@ -648,87 +890,336 @@ function renderShape(shape: Shape, selected: boolean, allShapes: Shape[]) {
   }
 
   if (shape.type === "socket") {
-  const linkedCableId = getLinkedCableId(shape, allShapes);
-  return (
-    <g key={shape.id}>
-      <rect
-        x={shape.x - shape.width / 2}
-        y={shape.y - shape.height / 2}
-        width={shape.width}
-        height={shape.height}
-        rx="10"
-        fill="rgba(0,231,167,.10)"
-        stroke={stroke}
-        strokeWidth={strokeWidth}
-      />
-      <circle cx={shape.x - 8} cy={shape.y} r="4" fill={stroke} />
-      <circle cx={shape.x + 8} cy={shape.y} r="4" fill={stroke} />
-      <text x={shape.x + 28} y={shape.y + 4} fill="#f2f6ff" fontSize="14">
-        {shape.label} {shape.groupName || ""}
-      </text>
-      {linkedCableId ? (
-        <text x={shape.x + 28} y={shape.y + 20} fill="#92a6d8" fontSize="12">
-          кабель: {linkedCableId.slice(0, 8)}
+    const linkedCableId = getLinkedCableId(shape, allShapes);
+
+    return (
+      <g key={shape.id}>
+        <rect
+          x={shape.x - shape.width / 2}
+          y={shape.y - shape.height / 2}
+          width={shape.width}
+          height={shape.height}
+          rx="10"
+          fill="rgba(0,231,167,.10)"
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+        />
+        <circle cx={shape.x - 8} cy={shape.y} r="4" fill={stroke} />
+        <circle cx={shape.x + 8} cy={shape.y} r="4" fill={stroke} />
+        <text x={shape.x + 28} y={shape.y + 4} fill="#f2f6ff" fontSize="14">
+          {shape.label} {shape.groupName || ""}
         </text>
-      ) : null}
-    </g>
-  );
+        {linkedCableId ? (
+          <text x={shape.x + 28} y={shape.y + 20} fill="#92a6d8" fontSize="12">
+            кабель: {linkedCableId.slice(0, 8)}
+          </text>
+        ) : null}
+      </g>
+    );
+  }
+
+  if (shape.type === "switch") {
+    return (
+      <g key={shape.id}>
+        <rect
+          x={shape.x - shape.width / 2}
+          y={shape.y - shape.height / 2}
+          width={shape.width}
+          height={shape.height}
+          rx="6"
+          fill="rgba(255,115,0,.10)"
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+        />
+        <line
+          x1={shape.x - 10}
+          y1={shape.y - 12}
+          x2={shape.x + 10}
+          y2={shape.y + 12}
+          stroke={stroke}
+          strokeWidth="3"
+        />
+        <text x={shape.x + 28} y={shape.y + 4} fill="#f2f6ff" fontSize="14">
+          {shape.label} {shape.groupName || ""}
+        </text>
+      </g>
+    );
+  }
+
+  return null;
 }
 
-if (shape.type === "switch") {
-  return (
-    <g key={shape.id}>
-      <rect
-        x={shape.x - shape.width / 2}
-        y={shape.y - shape.height / 2}
-        width={shape.width}
-        height={shape.height}
-        rx="6"
-        fill="rgba(255,115,0,.10)"
-        stroke={stroke}
-        strokeWidth={strokeWidth}
-      />
-      <line
-        x1={shape.x - 10}
-        y1={shape.y - 12}
-        x2={shape.x + 10}
-        y2={shape.y + 12}
-        stroke={stroke}
-        strokeWidth="3"
-      />
-      <text x={shape.x + 28} y={shape.y + 4} fill="#f2f6ff" fontSize="14">
-        {shape.label} {shape.groupName || ""}
-      </text>
-    </g>
-  );
+function buildEstimate(shapes: Shape[], metersPerPixel: number): EstimateRow[] {
+  const acc = new Map<string, EstimateRow>();
+
+  for (const shape of shapes) {
+    if (shape.type !== "cable") continue;
+
+    const meters = lineLengthMeters(shape, metersPerPixel);
+    const groupName = shape.groupName || "Без группы";
+    const cableType = shape.cableType || "Без типа";
+    const key = `${groupName}__${cableType}`;
+    const existing = acc.get(key);
+
+    if (existing) {
+      existing.meters += meters;
+    } else {
+      acc.set(key, { groupName, cableType, meters });
+    }
+  }
+
+  return [...acc.values()].sort((a, b) => a.groupName.localeCompare(b.groupName));
 }
 
-return null;
+function lineLengthMeters(shape: LineShape, metersPerPixel: number) {
+  const px = distance(shape.x, shape.y, shape.x2, shape.y2);
+  return metersPerPixel > 0 ? px * metersPerPixel : px;
+}
+
+function getLinkedCableId(shape: SocketShape | SwitchShape, allShapes: Shape[]) {
+  const groupName = (shape.groupName || "").trim();
+  const cables = allShapes.filter((s): s is LineShape => s.type === "cable");
+
+  const filtered = groupName
+    ? cables.filter((c) => (c.groupName || "").trim() === groupName)
+    : cables;
+
+  if (filtered.length === 0) return null;
+
+  let bestId: string | null = null;
+  let bestDist = Infinity;
+
+  for (const cable of filtered) {
+    const d = distancePointToSegment(shape.x, shape.y, cable.x, cable.y, cable.x2, cable.y2);
+    if (d < bestDist) {
+      bestDist = d;
+      bestId = cable.id;
+    }
+  }
+
+  return bestId;
+}
 
 function isPointOnShape(px: number, py: number, shape: Shape) {
   if (shape.type === "rectangle") {
     return px >= shape.x && px <= shape.x + shape.width && py >= shape.y && py <= shape.y + shape.height;
   }
+
   if (shape.type === "circle") {
-    return Math.hypot(px - shape.x, py - shape.y) <= shape.radius;
+    return distance(px, py, shape.x, shape.y) <= shape.radius;
   }
+
   if (shape.type === "line" || shape.type === "cable") {
-    const line = shape as LineShape;
-    const threshold = 12;
-    const dx = line.x2 - line.x;
-    const dy = line.y2 - line.y;
-    const lenSq = dx * dx + dy * dy;
-    if (!lenSq) return false;
-    const t = ((px - line.x) * dx + (py - line.y) * dy) / lenSq;
-    const clamped = Math.max(0, Math.min(1, t));
-    const cx = line.x + clamped * dx;
-    const cy = line.y + clamped * dy;
-    return Math.hypot(px - cx, py - cy) <= threshold;
+    return distancePointToSegment(px, py, shape.x, shape.y, shape.x2, shape.y2) <= 8;
   }
-  return (
-    px >= shape.x - shape.width / 2 &&
-    px <= shape.x + shape.width / 2 &&
-    py >= shape.y - shape.height / 2 &&
-    py <= shape.y + shape.height / 2
-  );
+
+  if (shape.type === "socket" || shape.type === "switch") {
+    return (
+      px >= shape.x - shape.width / 2 &&
+      px <= shape.x + shape.width / 2 &&
+      py >= shape.y - shape.height / 2 &&
+      py <= shape.y + shape.height / 2
+    );
+  }
+
+  return false;
 }
+
+function distance(x1: number, y1: number, x2: number, y2: number) {
+  return Math.hypot(x2 - x1, y2 - y1);
+}
+
+function distancePointToSegment(
+  px: number,
+  py: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number
+) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+
+  if (dx === 0 && dy === 0) return distance(px, py, x1, y1);
+
+  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)));
+  const projX = x1 + t * dx;
+  const projY = y1 + t * dy;
+
+  return distance(px, py, projX, projY);
+}
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9а-яё_-]+/gi, "")
+    .replace(/-+/g, "-");
+}
+
+const styles: Record<string, React.CSSProperties> = {
+  page: {
+    minHeight: "100vh",
+    background: "#0b1020",
+    color: "#f2f6ff",
+    padding: 16,
+    boxSizing: "border-box",
+    fontFamily: "Inter, Arial, sans-serif",
+  },
+  topbar: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 16,
+    flexWrap: "wrap",
+  },
+  leftBlock: {
+    display: "flex",
+    gap: 8,
+    flexWrap: "wrap",
+    alignItems: "center",
+  },
+  projectInput: {
+    background: "#121937",
+    color: "#fff",
+    border: "1px solid #27305f",
+    borderRadius: 10,
+    padding: "10px 12px",
+    minWidth: 220,
+  },
+  btn: {
+    background: "#1a234a",
+    color: "#fff",
+    border: "1px solid #33407a",
+    borderRadius: 10,
+    padding: "10px 12px",
+    cursor: "pointer",
+  },
+  btnActive: {
+    background: "#2948c7",
+    color: "#fff",
+    border: "1px solid #7aa0ff",
+    borderRadius: 10,
+    padding: "10px 12px",
+    cursor: "pointer",
+  },
+  btnDanger: {
+    background: "#4a1d24",
+    color: "#fff",
+    border: "1px solid #8a3f4d",
+    borderRadius: 10,
+    padding: "10px 12px",
+    cursor: "pointer",
+  },
+  fileLabel: {
+    background: "#1a234a",
+    color: "#fff",
+    border: "1px solid #33407a",
+    borderRadius: 10,
+    padding: "10px 12px",
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+  },
+  main: {
+    display: "grid",
+    gridTemplateColumns: "1fr 340px",
+    gap: 16,
+  },
+  canvasWrap: {
+    minWidth: 0,
+  },
+  statusBar: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 12,
+    background: "#121937",
+    border: "1px solid #26305b",
+    borderRadius: 12,
+    padding: "10px 12px",
+    marginBottom: 12,
+    flexWrap: "wrap",
+  },
+  board: {
+    position: "relative",
+    width: "100%",
+    aspectRatio: "1400 / 900",
+    border: "1px solid #26305b",
+    borderRadius: 14,
+    overflow: "hidden",
+    background: "#0f1630",
+  },
+  planImage: {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    objectFit: "contain",
+    opacity: 0.65,
+    pointerEvents: "none",
+  },
+  planFrame: {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    border: "none",
+    opacity: 0.85,
+    pointerEvents: "none",
+    background: "#fff",
+  },
+  svg: {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    cursor: "crosshair",
+  },
+  sidebar: {
+    display: "grid",
+    gap: 16,
+    alignContent: "start",
+  },
+  card: {
+    background: "#121937",
+    border: "1px solid #26305b",
+    borderRadius: 14,
+    padding: 14,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: 700,
+    marginBottom: 12,
+  },
+  field: {
+    display: "grid",
+    gap: 6,
+    marginBottom: 10,
+  },
+  label: {
+    fontSize: 13,
+    color: "#b9c7ef",
+  },
+  input: {
+    background: "#0c1330",
+    color: "#fff",
+    border: "1px solid #2a376f",
+    borderRadius: 10,
+    padding: "10px 12px",
+    width: "100%",
+    boxSizing: "border-box",
+  },
+  hint: {
+    color: "#b9c7ef",
+    fontSize: 13,
+    lineHeight: 1.5,
+  },
+  estimateRow: {
+    display: "grid",
+    gap: 4,
+    background: "#0c1330",
+    border: "1px solid #26305b",
+    borderRadius: 10,
+    padding: 10,
+  },
+};
