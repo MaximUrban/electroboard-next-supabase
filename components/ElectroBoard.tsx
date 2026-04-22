@@ -648,26 +648,62 @@ function renderShape(shape: Shape, selected: boolean, allShapes: Shape[]) {
   }
 
   if (shape.type === "socket") {
-    const linkedCableId = getLinkedCableId(shape, allShapes);
-    return (
-      <g key={shape.id}>
-        <rect x={shape.x - shape.width / 2} y={shape.y - shape.height / 2} width={shape.width} height={shape.height} rx="10" fill="rgba(0,231,167,.10)" stroke={stroke} strokeWidth={strokeWidth} />
-        <circle cx={shape.x - 8} cy={shape.y} r="4" fill={stroke} />
-        <circle cx={shape.x + 8} cy={shape.y} r="4" fill={stroke} />
-        <text x={shape.x + 28} y={shape.y + 4} fill="#f2f6ff" fontSize="14">{shape.label} {shape.groupName || ""}</text>
-        {linkedCableId ? <text x={shape.x + 28} y={shape.y + 20} fill="#92a6d8" fontSize="12">кабель: {linkedCableId.slice(0, 8)}</text> : null}
-      </g>
-    );
-  }
-
+  const linkedCableId = getLinkedCableId(shape, allShapes);
   return (
     <g key={shape.id}>
-      <rect x={shape.x - shape.width / 2} y={shape.y - shape.height / 2} width={shape.width} height={shape.height} rx="6" fill="rgba(255,115,0,.10)" stroke={stroke} strokeWidth={strokeWidth} />
-      <line x1={shape.x - 10} y1={shape.y - 12} x2={shape.x + 10} y2={shape.y + 12} stroke={stroke} strokeWidth="3" />
-      <text x={shape.x + 28} y={shape.y + 4} fill="#f2f6ff" fontSize="14">{shape.label} {shape.groupName || ""}</text>
+      <rect
+        x={shape.x - shape.width / 2}
+        y={shape.y - shape.height / 2}
+        width={shape.width}
+        height={shape.height}
+        rx="10"
+        fill="rgba(0,231,167,.10)"
+        stroke={stroke}
+        strokeWidth={strokeWidth}
+      />
+      <circle cx={shape.x - 8} cy={shape.y} r="4" fill={stroke} />
+      <circle cx={shape.x + 8} cy={shape.y} r="4" fill={stroke} />
+      <text x={shape.x + 28} y={shape.y + 4} fill="#f2f6ff" fontSize="14">
+        {shape.label} {shape.groupName || ""}
+      </text>
+      {linkedCableId ? (
+        <text x={shape.x + 28} y={shape.y + 20} fill="#92a6d8" fontSize="12">
+          кабель: {linkedCableId.slice(0, 8)}
+        </text>
+      ) : null}
     </g>
   );
 }
+
+if (shape.type === "switch") {
+  return (
+    <g key={shape.id}>
+      <rect
+        x={shape.x - shape.width / 2}
+        y={shape.y - shape.height / 2}
+        width={shape.width}
+        height={shape.height}
+        rx="6"
+        fill="rgba(255,115,0,.10)"
+        stroke={stroke}
+        strokeWidth={strokeWidth}
+      />
+      <line
+        x1={shape.x - 10}
+        y1={shape.y - 12}
+        x2={shape.x + 10}
+        y2={shape.y + 12}
+        stroke={stroke}
+        strokeWidth="3"
+      />
+      <text x={shape.x + 28} y={shape.y + 4} fill="#f2f6ff" fontSize="14">
+        {shape.label} {shape.groupName || ""}
+      </text>
+    </g>
+  );
+}
+
+return null;
 
 function isPointOnShape(px: number, py: number, shape: Shape) {
   if (shape.type === "rectangle") {
