@@ -46,12 +46,19 @@ type CircleShape = BaseShape & {
   radius: number;
 };
 
+type LineAttachment = {
+  shapeId: string;
+  anchorId: string;
+};
+
 type LineShape = BaseShape & {
   type: "line" | "cable";
   x: number;
   y: number;
   x2: number;
   y2: number;
+  startAttachment?: LineAttachment;
+  endAttachment?: LineAttachment;
 };
 
 type SocketShape = BaseShape & {
@@ -103,6 +110,12 @@ type InteractionState = {
   initialShape: Shape;
 };
 
+type AnchorPoint = {
+  id: string;
+  x: number;
+  y: number;
+};
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const SUPABASE_BUCKET = process.env.NEXT_PUBLIC_SUPABASE_BUCKET || "plans";
@@ -144,7 +157,10 @@ export default function ElectroBoard() {
   const estimate = useMemo(() => buildEstimate(shapes, metersPerPixel), [shapes, metersPerPixel]);
 
   function setShapePatch(id: string, patch: Partial<Shape>) {
-    setShapes((prev) => prev.map((s) => (s.id === id ? ({ ...s, ...patch } as Shape) : s)));
+    setShapes((prev) => {
+      const updated = prev.map((s) => (s.id === id ? ({ ...s, ...patch } as Shape) : s));
+      return applyAttachments(updated);
+    });
   }
 
   function getSvgPoint(clientX: number, clientY: number) {
@@ -303,7 +319,6 @@ export default function ElectroBoard() {
       };
       setDraftLine(shape);
       setSelectedId(shape.id);
-      return;
     }
   }
 
@@ -317,12 +332,14 @@ export default function ElectroBoard() {
 
     if (!interaction) return;
 
-    setShapes((prev) =>
-      prev.map((shape) => {
+    setShapes((prev) => {
+      const updated = prev.map((shape) => {
         if (shape.id !== interaction.shapeId) return shape;
         return transformShape(shape, interaction, point);
-      })
-    );
+      });
+
+      return applyAttachments(updated);
+    });
   }
 
   function handleCanvasMouseUp() {
@@ -330,7 +347,58 @@ export default function ElectroBoard() {
       setShapes((prev) => [...prev, draftLine]);
       setDraftLine(null);
       setTool("select");
+      return;
     }
+
+    if (interaction && (interaction.mode === "line-start" || interaction.mode === "line-end")) {
+      setShapes((prev) => {
+        const updated = prev.map((shape) => {
+          if (shape.id !== interaction.shapeId) return shape;
+          if (shape.type !== "line" && shape.type !== "cable") return shape;
+
+          const point =
+            interaction.mode === "line-start"
+              ? { x: shape.x, y: shape.y }
+              : { x: shape.x2, y: shape.y2 };
+
+          const snap = findClosestAnchor(prev, point, 22, shape.id);
+
+          if (!snap) {
+            if (interaction.mode === "line-start") {
+              return { ...shape, startAttachment: undefined };
+            }
+            return { ...shape, endAttachment: undefined };
+          }
+
+          if (interaction.mode === "line-start") {
+            return {
+              ...shape,
+              x: snap.x,
+              y: snap.y,
+              startAttachment: {
+                shapeId: snap.shapeId,
+                anchorId: snap.anchorId,
+              },
+            };
+          }
+
+          return {
+            ...shape,
+            x2: snap.x,
+            y2: snap.y,
+            endAttachment: {
+              shapeId: snap.shapeId,
+              anchorId: snap.anchorId,
+            },
+          };
+        });
+
+        return applyAttachments(updated);
+      });
+    } else {
+      setShapes((prev) => applyAttachments(prev));
+    }
+
     setInteraction(null);
   }
 
@@ -966,9 +1034,14 @@ function renderSelectionOverlay(shape: Shape) {
     );
   }
 
+  const anchors = getShapeAnchors(shape);
+
   if (shape.type === "circle") {
     return (
       <g>
+        {anchors.map((a) => (
+          <circle key={a.id} cx={a.x} cy={a.y} r="4" fill="#9ec1ff" stroke="#fff" strokeWidth="1.5" />
+        ))}
         <circle cx={shape.x + shape.radius} cy={shape.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" />
       </g>
     );
@@ -980,6 +1053,9 @@ function renderSelectionOverlay(shape: Shape) {
 
     return (
       <g>
+        {anchors.map((a) => (
+          <circle key={a.id} cx={a.x} cy={a.y} r="4" fill="#9ec1ff" stroke="#fff" strokeWidth="1.5" />
+        ))}
         <circle
           cx={box.x + box.width}
           cy={box.y + box.height}
@@ -1060,6 +1136,7 @@ function transformShape(shape: Shape, interaction: InteractionState, point: { x:
       ...shape,
       x: point.x,
       y: point.y,
+      startAttachment: undefined,
     };
   }
 
@@ -1068,6 +1145,7 @@ function transformShape(shape: Shape, interaction: InteractionState, point: { x:
       ...shape,
       x2: point.x,
       y2: point.y,
+      endAttachment: undefined,
     };
   }
 
@@ -1169,6 +1247,109 @@ function getSelectionBox(shape: RectangleShape | SocketShape | SwitchShape) {
     cx: shape.x,
     cy: shape.y,
   };
+}
+
+function getShapeAnchors(shape: Shape): AnchorPoint[] {
+  if (shape.type === "line" || shape.type === "cable") return [];
+
+  if (shape.type === "circle") {
+    return [
+      { id: "center", x: shape.x, y: shape.y },
+      { id: "top", x: shape.x, y: shape.y - shape.radius },
+      { id: "right", x: shape.x + shape.radius, y: shape.y },
+      { id: "bottom", x: shape.x, y: shape.y + shape.radius },
+      { id: "left", x: shape.x - shape.radius, y: shape.y },
+    ];
+  }
+
+  if (shape.type === "rectangle") {
+    return [
+      { id: "center", x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 },
+      { id: "top", x: shape.x + shape.width / 2, y: shape.y },
+      { id: "right", x: shape.x + shape.width, y: shape.y + shape.height / 2 },
+      { id: "bottom", x: shape.x + shape.width / 2, y: shape.y + shape.height },
+      { id: "left", x: shape.x, y: shape.y + shape.height / 2 },
+    ];
+  }
+
+  if (shape.type === "socket" || shape.type === "switch") {
+    return [
+      { id: "center", x: shape.x, y: shape.y },
+      { id: "top", x: shape.x, y: shape.y - shape.height / 2 },
+      { id: "right", x: shape.x + shape.width / 2, y: shape.y },
+      { id: "bottom", x: shape.x, y: shape.y + shape.height / 2 },
+      { id: "left", x: shape.x - shape.width / 2, y: shape.y },
+    ];
+  }
+
+  return [];
+}
+
+function findClosestAnchor(
+  shapes: Shape[],
+  point: { x: number; y: number },
+  maxDistance = 20,
+  excludeLineId?: string
+): { shapeId: string; anchorId: string; x: number; y: number } | null {
+  let best: { shapeId: string; anchorId: string; x: number; y: number } | null = null;
+  let bestDist = Infinity;
+
+  for (const shape of shapes) {
+    if (shape.id === excludeLineId) continue;
+    if (shape.type === "line" || shape.type === "cable") continue;
+
+    for (const anchor of getShapeAnchors(shape)) {
+      const d = distance(point.x, point.y, anchor.x, anchor.y);
+      if (d < bestDist && d <= maxDistance) {
+        bestDist = d;
+        best = {
+          shapeId: shape.id,
+          anchorId: anchor.id,
+          x: anchor.x,
+          y: anchor.y,
+        };
+      }
+    }
+  }
+
+  return best;
+}
+
+function getAnchorPosition(shape: Shape, anchorId: string): { x: number; y: number } | null {
+  const anchor = getShapeAnchors(shape).find((a) => a.id === anchorId);
+  return anchor ? { x: anchor.x, y: anchor.y } : null;
+}
+
+function applyAttachments(shapes: Shape[]): Shape[] {
+  return shapes.map((shape) => {
+    if (shape.type !== "line" && shape.type !== "cable") return shape;
+
+    const next = { ...shape };
+
+    if (shape.startAttachment) {
+      const target = shapes.find((s) => s.id === shape.startAttachment?.shapeId);
+      if (target) {
+        const p = getAnchorPosition(target, shape.startAttachment.anchorId);
+        if (p) {
+          next.x = p.x;
+          next.y = p.y;
+        }
+      }
+    }
+
+    if (shape.endAttachment) {
+      const target = shapes.find((s) => s.id === shape.endAttachment?.shapeId);
+      if (target) {
+        const p = getAnchorPosition(target, shape.endAttachment.anchorId);
+        if (p) {
+          next.x2 = p.x;
+          next.y2 = p.y;
+        }
+      }
+    }
+
+    return next;
+  });
 }
 
 function buildEstimate(shapes: Shape[], metersPerPixel: number): EstimateRow[] {
