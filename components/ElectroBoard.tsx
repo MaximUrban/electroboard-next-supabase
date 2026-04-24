@@ -168,6 +168,7 @@ export default function ElectroBoard() {
       if (next.length === 2) {
         const px = distance(next[0].x, next[0].y, next[1].x, next[1].y);
         const meters = Number(calibrationDistanceMeters);
+
         if (px > 0 && meters > 0) {
           setMetersPerPixel(meters / px);
           setStatus(`Масштаб задан: ${meters.toFixed(2)} м на ${px.toFixed(0)} px`);
@@ -180,7 +181,6 @@ export default function ElectroBoard() {
 
     if (tool === "select") {
       const selected = selectedShape;
-
       if (selected) {
         const handle = hitTestHandle(point.x, point.y, selected);
         if (handle) {
@@ -197,6 +197,7 @@ export default function ElectroBoard() {
       const hit = [...shapes].reverse().find((shape) => isPointOnShape(point.x, point.y, shape));
       if (hit) {
         setSelectedId(hit.id);
+        setShowStyleModal(false);
         setInteraction({
           mode: "move",
           shapeId: hit.id,
@@ -301,6 +302,7 @@ export default function ElectroBoard() {
       };
       setDraftLine(shape);
       setSelectedId(shape.id);
+      return;
     }
   }
 
@@ -810,10 +812,10 @@ export default function ElectroBoard() {
 
 function renderShape(shape: Shape, selected: boolean, allShapes: Shape[]) {
   const stroke = selected ? "#79a6ff" : shape.strokeColor;
-  const fill = shape.type === "line" || shape.type === "cable"
-    ? "transparent"
-    : hexToRgba(shape.fillColor, shape.opacity);
-
+  const fill =
+    shape.type === "line" || shape.type === "cable"
+      ? "transparent"
+      : hexToRgba(shape.fillColor, shape.opacity);
   const dash = shape.strokeStyle === "dashed" ? "8 6" : undefined;
 
   if (shape.type === "rectangle") {
@@ -886,11 +888,9 @@ function renderShape(shape: Shape, selected: boolean, allShapes: Shape[]) {
 
   if (shape.type === "socket") {
     const linkedCableId = getLinkedCableId(shape, allShapes);
-    const cx = shape.x;
-    const cy = shape.y;
 
     return (
-      <g transform={`rotate(${shape.rotation} ${cx} ${cy})`}>
+      <g transform={`rotate(${shape.rotation} ${shape.x} ${shape.y})`}>
         <rect
           x={shape.x - shape.width / 2}
           y={shape.y - shape.height / 2}
@@ -917,11 +917,8 @@ function renderShape(shape: Shape, selected: boolean, allShapes: Shape[]) {
   }
 
   if (shape.type === "switch") {
-    const cx = shape.x;
-    const cy = shape.y;
-
     return (
-      <g transform={`rotate(${shape.rotation} ${cx} ${cy})`}>
+      <g transform={`rotate(${shape.rotation} ${shape.x} ${shape.y})`}>
         <rect
           x={shape.x - shape.width / 2}
           y={shape.y - shape.height / 2}
@@ -989,11 +986,7 @@ function renderSelectionOverlay(shape: Shape) {
     );
   }
 
-  if (
-    shape.type === "rectangle" ||
-    shape.type === "socket" ||
-    shape.type === "switch"
-  ) {
+  if (shape.type === "rectangle" || shape.type === "socket" || shape.type === "switch") {
     const box = getSelectionBox(shape);
     const rotateHandle = { x: box.cx, y: box.y - 28 };
 
@@ -1166,12 +1159,14 @@ function hitTestHandle(px: number, py: number, shape: Shape): HandleType | null 
     return null;
   }
 
-  const box = getSelectionBox(shape);
-  const rotateHandle = { x: box.cx, y: box.y - 28 };
-  const resizeHandle = { x: box.x + box.width, y: box.y + box.height };
+  if (shape.type === "rectangle" || shape.type === "socket" || shape.type === "switch") {
+    const box = getSelectionBox(shape);
+    const rotateHandle = { x: box.cx, y: box.y - 28 };
+    const resizeHandle = { x: box.x + box.width, y: box.y + box.height };
 
-  if (distance(px, py, rotateHandle.x, rotateHandle.y) <= 12) return "rotate";
-  if (distance(px, py, resizeHandle.x, resizeHandle.y) <= 12) return "resize-se";
+    if (distance(px, py, rotateHandle.x, rotateHandle.y) <= 12) return "rotate";
+    if (distance(px, py, resizeHandle.x, resizeHandle.y) <= 12) return "resize-se";
+  }
 
   return null;
 }
@@ -1304,9 +1299,8 @@ function distancePointToSegment(
 
 function hexToRgba(hex: string, opacity: number) {
   const safe = safeColor(hex).replace("#", "");
-  const normalized = safe.length === 3
-    ? safe.split("").map((c) => c + c).join("")
-    : safe;
+  const normalized =
+    safe.length === 3 ? safe.split("").map((c) => c + c).join("") : safe;
 
   const r = parseInt(normalized.slice(0, 2), 16);
   const g = parseInt(normalized.slice(2, 4), 16);
