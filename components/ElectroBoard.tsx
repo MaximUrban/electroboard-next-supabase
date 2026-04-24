@@ -966,6 +966,58 @@ function renderSelectionOverlay(shape: Shape) {
     return (
       <g>
         <circle
+          cx={shape.x + shape.radius}
+          cy={shape.y}
+          r="8"
+          fill="#fff"
+          stroke="#3d63ff"
+          strokeWidth="3"
+        />
+      </g>
+    );
+  }
+
+  if (shape.type === "rectangle" || shape.type === "socket" || shape.type === "switch") {
+    const box = getSelectionBox(shape);
+    const rotateHandle = { x: box.cx, y: box.y - 28 };
+
+    return (
+      <g>
+        <circle
+          cx={box.x + box.width}
+          cy={box.y + box.height}
+          r="8"
+          fill="#fff"
+          stroke="#3d63ff"
+          strokeWidth="3"
+        />
+        <line
+          x1={box.cx}
+          y1={box.y}
+          x2={rotateHandle.x}
+          y2={rotateHandle.y}
+          stroke="#79a6ff"
+          strokeWidth="2"
+        />
+        <circle
+          cx={rotateHandle.x}
+          cy={rotateHandle.y}
+          r="8"
+          fill="#fff"
+          stroke="#3d63ff"
+          strokeWidth="3"
+        />
+      </g>
+    );
+  }
+
+  return null;
+}
+
+  if (shape.type === "circle") {
+    return (
+      <g>
+        <circle
           cx={shape.x}
           cy={shape.y}
           r={shape.radius + 8}
