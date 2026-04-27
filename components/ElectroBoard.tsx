@@ -49,6 +49,7 @@ type BaseShape = ShapeStyle & {
   label: string;
   groupName?: string;
   cableType?: string;
+  locked?: boolean;
 };
 
 type RectangleShape = BaseShape & {
@@ -961,51 +962,55 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
     }
 
     if (tool === "select") {
-      if (selectedShape) {
-        const handle = hitTestHandleScreen(screenPoint, selectedShape, camera);
-        if (handle) {
-          setInteraction({
-            mode: handle,
-            shapeId: selectedShape.id,
-            startPointer: point,
-            initialShape: cloneDeep(selectedShape),
-          });
-          if (handle === "line-start" || handle === "line-end") {
-            updateHoverAnchors(point, selectedShape.id);
-          }
-          return;
-        }
-      }
+      if (selectedShape && !isShapeLocked(selectedShape)) {
+  const handle = hitTestHandleScreen(screenPoint, selectedShape, camera);
+  if (handle) {
+    setInteraction({
+      mode: handle,
+      shapeId: selectedShape.id,
+      startPointer: point,
+      initialShape: cloneDeep(selectedShape),
+    });
+    if (handle === "line-start" || handle === "line-end") {
+      updateHoverAnchors(point, selectedShape.id);
+    }
+    return;
+  }
+}
 
       const hit = [...shapes].reverse().find((shape) => isPointOnShape(point.x, point.y, shape));
 
       if (hit) {
-        if (e.altKey) {
-          const duplicated = duplicateShapeWithoutAttachments(hit);
-          setShapes((prev) => {
-            const next = [...prev, duplicated];
-            window.setTimeout(() => commitHistory(next), 0);
-            return next;
-          });
-          setSelectedId(duplicated.id);
-          setInteraction({
-            mode: "move",
-            shapeId: duplicated.id,
-            startPointer: point,
-            initialShape: cloneDeep(duplicated),
-          });
-          return;
-        }
+  if (e.altKey && !isShapeLocked(hit)) {
+    const duplicated = duplicateShapeWithoutAttachments(hit);
+    setShapes((prev) => {
+      const next = [...prev, duplicated];
+      window.setTimeout(() => commitHistory(next), 0);
+      return next;
+    });
+    setSelectedId(duplicated.id);
+    setInteraction({
+      mode: "move",
+      shapeId: duplicated.id,
+      startPointer: point,
+      initialShape: cloneDeep(duplicated),
+    });
+    return;
+  }
 
-        setSelectedId(hit.id);
-        setInteraction({
-          mode: "move",
-          shapeId: hit.id,
-          startPointer: point,
-          initialShape: cloneDeep(hit),
-        });
-        return;
-      }
+  setSelectedId(hit.id);
+
+  if (!isShapeLocked(hit)) {
+    setInteraction({
+      mode: "move",
+      shapeId: hit.id,
+      startPointer: point,
+      initialShape: cloneDeep(hit),
+    });
+  }
+
+  return;
+}
 
       setSelectedId(null);
       setInteraction(null);
@@ -1175,7 +1180,7 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
     }
 
     if (!interaction) {
-  if (selectedShape) {
+  if (selectedShape && !isShapeLocked(selectedShape)) {
     const hoveredHandle = hitTestHandleScreen(screenPoint, selectedShape, camera);
     if (hoveredHandle) {
       setCanvasCursor(getCursorByHandle(hoveredHandle));
@@ -1183,13 +1188,13 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
       const hit = [...shapes].reverse().find((shape) =>
         isPointOnShape(point.x, point.y, shape)
       );
-      setCanvasCursor(hit ? "move" : "grab");
+      setCanvasCursor(hit && !isShapeLocked(hit) ? "move" : "grab");
     }
   } else {
     const hit = [...shapes].reverse().find((shape) =>
       isPointOnShape(point.x, point.y, shape)
     );
-    setCanvasCursor(hit ? "move" : "grab");
+    setCanvasCursor(hit && !isShapeLocked(hit) ? "move" : "grab");
   }
 
   if (tool === "line" || tool === "cable") {
@@ -1555,7 +1560,7 @@ setCanvasCursor("grab");
                 ) : null}
               </g>
 {renderAlignmentGuidesScreen(alignmentGuides, camera, canvasSize)}
-{selectedShape ? renderSelectionOverlayScreen(selectedShape, camera) : null}
+{selectedShape && !isShapeLocked(selectedShape)   ? renderSelectionOverlayScreen(selectedShape, camera)   : null}
             </svg>
 
             <div style={styles.zoomControls}>
@@ -1655,6 +1660,27 @@ setCanvasCursor("grab");
                     style={styles.inputCompact}
                   />
                 </div>
+                <div style={styles.compactField}>
+  <label style={styles.label}>Фиксация</label>
+  <label
+    style={{
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      fontSize: 13,
+      color: "#dce7ff",
+    }}
+  >
+    <input
+      type="checkbox"
+      checked={Boolean(selectedShape.locked)}
+      onChange={(e) =>
+        setShapePatch(selectedShape.id, { locked: e.target.checked })
+      }
+    />
+    Зафиксировать элемент
+  </label>
+</div>
 
                 {selectedShape.type === "cad" ? (
                   <>
@@ -2140,8 +2166,8 @@ function renderShape(
           style={{ cursor: "move" }}
         />
         <text x={shape.x + 6} y={shape.y - 10} fill="#f2f6ff" fontSize="14">
-          {shape.label}
-        </text>
+  {shape.label} {shape.locked ? "🔒" : ""}
+</text>
       </g>
     );
   }
@@ -2160,8 +2186,8 @@ function renderShape(
           style={{ cursor: "move" }}
         />
         <text x={shape.x + shape.radius + 6} y={shape.y - shape.radius - 10} fill="#f2f6ff" fontSize="14">
-          {shape.label}
-        </text>
+  {shape.label} {shape.locked ? "🔒" : ""}
+</text>
       </g>
     );
   }
@@ -2182,8 +2208,8 @@ function renderShape(
           style={{ cursor: "move" }}
         />
         <text x={(shape.x + shape.x2) / 2 + 6} y={(shape.y + shape.y2) / 2 - 6} fill="#f2f6ff" fontSize="14">
-          {shape.label} {shape.groupName ? `(${shape.groupName})` : ""}
-        </text>
+  {shape.label} {shape.groupName ? `(${shape.groupName})` : ""} {shape.locked ? "🔒" : ""}
+</text>
       </g>
     );
   }
@@ -3466,6 +3492,9 @@ function isSideResizeHandle(handle: HandleType) {
     handle === "resize-e" ||
     handle === "resize-w"
   );
+}
+function isShapeLocked(shape: Shape | null | undefined) {
+  return Boolean(shape?.locked);
 }
 function getCursorByHandle(handle: HandleType): React.CSSProperties["cursor"] {
   switch (handle) {
