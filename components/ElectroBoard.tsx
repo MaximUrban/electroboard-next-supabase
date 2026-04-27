@@ -145,6 +145,13 @@ const defaultStyle: ShapeStyle = {
   rotation: 0,
 };
 
+const WORLD_BOUNDS = {
+  x: -20000,
+  y: -20000,
+  width: 40000,
+  height: 40000,
+};
+
 export default function ElectroBoard({ projectId }: { projectId: string }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
 
@@ -210,8 +217,14 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       setHistoryIndex(0);
     }
 
+    setCamera({
+      x: canvasSize.width / 2,
+      y: canvasSize.height / 2,
+      zoom: 1,
+    });
+
     setLoaded(true);
-  }, [projectId]);
+  }, [projectId, canvasSize.width, canvasSize.height]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -391,11 +404,6 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     };
   }
 
-  function getWorldPoint(clientX: number, clientY: number) {
-    const screen = getScreenPoint(clientX, clientY);
-    return screenToWorld(screen.x, screen.y);
-  }
-
   function setShapePatch(id: string, patch: Partial<Shape>) {
     setShapes((prev) => {
       const next = applyAttachments(prev.map((s) => (s.id === id ? ({ ...s, ...patch } as Shape) : s)));
@@ -458,6 +466,36 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     copy.x += 20;
     copy.y += 20;
     return copy;
+  }
+
+  function zoomAtScreenPoint(screenX: number, screenY: number, factor: number) {
+    const worldBefore = screenToWorld(screenX, screenY);
+    const nextZoom = Math.max(0.2, Math.min(4, camera.zoom * factor));
+
+    const nextCameraX = screenX - worldBefore.x * nextZoom;
+    const nextCameraY = screenY - worldBefore.y * nextZoom;
+
+    setCamera({
+      x: nextCameraX,
+      y: nextCameraY,
+      zoom: nextZoom,
+    });
+  }
+
+  function zoomIn() {
+    zoomAtScreenPoint(canvasSize.width / 2, canvasSize.height / 2, 1.15);
+  }
+
+  function zoomOut() {
+    zoomAtScreenPoint(canvasSize.width / 2, canvasSize.height / 2, 0.85);
+  }
+
+  function resetView() {
+    setCamera({
+      x: canvasSize.width / 2,
+      y: canvasSize.height / 2,
+      zoom: 1,
+    });
   }
 
   function handleCanvasMouseDown(e: React.MouseEvent<SVGSVGElement>) {
@@ -744,19 +782,9 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     e.preventDefault();
 
     const screen = getScreenPoint(e.clientX, e.clientY);
-    const worldBefore = screenToWorld(screen.x, screen.y);
+    const factor = e.deltaY < 0 ? 1.1 : 0.9;
 
-    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-    const nextZoom = Math.max(0.2, Math.min(4, camera.zoom * zoomFactor));
-
-    const nextCameraX = screen.x - worldBefore.x * nextZoom;
-    const nextCameraY = screen.y - worldBefore.y * nextZoom;
-
-    setCamera({
-      x: nextCameraX,
-      y: nextCameraY,
-      zoom: nextZoom,
-    });
+    zoomAtScreenPoint(screen.x, screen.y, factor);
   }
 
   function deleteSelected() {
@@ -843,7 +871,13 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
               </defs>
 
               <g transform={`translate(${camera.x} ${camera.y}) scale(${camera.zoom})`}>
-                <rect x={-20000} y={-20000} width={40000} height={40000} fill="url(#grid)" />
+                <rect
+                  x={WORLD_BOUNDS.x}
+                  y={WORLD_BOUNDS.y}
+                  width={WORLD_BOUNDS.width}
+                  height={WORLD_BOUNDS.height}
+                  fill="url(#grid)"
+                />
 
                 {shapes.map((shape) => (
                   <React.Fragment key={shape.id}>
@@ -875,6 +909,31 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
                 ) : null}
               </g>
             </svg>
+
+            <div style={styles.zoomControls}>
+              <button style={styles.zoomBtn} onClick={zoomIn} title="Приблизить">
+                +
+              </button>
+              <button style={styles.zoomBtn} onClick={zoomOut} title="Отдалить">
+                −
+              </button>
+              <button style={styles.zoomResetBtn} onClick={resetView} title="Сбросить вид">
+                reset
+              </button>
+            </div>
+
+            <MiniMap
+              shapes={shapes}
+              camera={camera}
+              canvasSize={canvasSize}
+              onJump={(worldX, worldY) => {
+                setCamera({
+                  x: canvasSize.width / 2 - worldX * camera.zoom,
+                  y: canvasSize.height / 2 - worldY * camera.zoom,
+                  zoom: camera.zoom,
+                });
+              }}
+            />
           </div>
         </div>
 
@@ -1071,6 +1130,141 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
           {lastSavedAt ? `Автосохранение` : `Ожидание`}
         </span>
       </div>
+    </div>
+  );
+}
+
+function MiniMap({
+  shapes,
+  camera,
+  canvasSize,
+  onJump,
+}: {
+  shapes: Shape[];
+  camera: CameraState;
+  canvasSize: { width: number; height: number };
+  onJump: (worldX: number, worldY: number) => void;
+}) {
+  const miniWidth = 220;
+  const miniHeight = 150;
+
+  const scaleX = miniWidth / WORLD_BOUNDS.width;
+  const scaleY = miniHeight / WORLD_BOUNDS.height;
+
+  const viewLeft = (-camera.x) / camera.zoom;
+  const viewTop = (-camera.y) / camera.zoom;
+  const viewWidth = canvasSize.width / camera.zoom;
+  const viewHeight = canvasSize.height / camera.zoom;
+
+  function worldToMini(x: number, y: number) {
+    return {
+      x: (x - WORLD_BOUNDS.x) * scaleX,
+      y: (y - WORLD_BOUNDS.y) * scaleY,
+    };
+  }
+
+  function handleMiniMapClick(e: React.MouseEvent<SVGSVGElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const localX = ((e.clientX - rect.left) / rect.width) * miniWidth;
+    const localY = ((e.clientY - rect.top) / rect.height) * miniHeight;
+
+    const worldX = WORLD_BOUNDS.x + localX / scaleX;
+    const worldY = WORLD_BOUNDS.y + localY / scaleY;
+
+    onJump(worldX, worldY);
+  }
+
+  return (
+    <div style={styles.minimapWrap}>
+      <svg
+        viewBox={`0 0 ${miniWidth} ${miniHeight}`}
+        style={styles.minimapSvg}
+        onClick={handleMiniMapClick}
+      >
+        <rect x={0} y={0} width={miniWidth} height={miniHeight} fill="#0c1330" />
+
+        {shapes.map((shape) => {
+          if (shape.type === "line" || shape.type === "cable") {
+            const a = worldToMini(shape.x, shape.y);
+            const b = worldToMini(shape.x2, shape.y2);
+
+            return (
+              <line
+                key={shape.id}
+                x1={a.x}
+                y1={a.y}
+                x2={b.x}
+                y2={b.y}
+                stroke={shape.strokeColor}
+                strokeWidth={Math.max(1, shape.strokeWidth * 0.4)}
+                opacity={0.9}
+              />
+            );
+          }
+
+          if (shape.type === "circle") {
+            const p = worldToMini(shape.x, shape.y);
+            return (
+              <circle
+                key={shape.id}
+                cx={p.x}
+                cy={p.y}
+                r={Math.max(2, shape.radius * scaleX)}
+                fill={shape.fillColor}
+                stroke={shape.strokeColor}
+                strokeWidth={1}
+                opacity={0.9}
+              />
+            );
+          }
+
+          if (shape.type === "rectangle") {
+            const p = worldToMini(shape.x, shape.y);
+            return (
+              <rect
+                key={shape.id}
+                x={p.x}
+                y={p.y}
+                width={Math.max(2, shape.width * scaleX)}
+                height={Math.max(2, shape.height * scaleY)}
+                fill={shape.fillColor}
+                stroke={shape.strokeColor}
+                strokeWidth={1}
+                opacity={0.9}
+              />
+            );
+          }
+
+          if (shape.type === "socket" || shape.type === "switch") {
+            const p = worldToMini(shape.x - shape.width / 2, shape.y - shape.height / 2);
+            return (
+              <rect
+                key={shape.id}
+                x={p.x}
+                y={p.y}
+                width={Math.max(2, shape.width * scaleX)}
+                height={Math.max(2, shape.height * scaleY)}
+                fill={shape.fillColor}
+                stroke={shape.strokeColor}
+                strokeWidth={1}
+                opacity={0.95}
+              />
+            );
+          }
+
+          return null;
+        })}
+
+        <rect
+          x={(viewLeft - WORLD_BOUNDS.x) * scaleX}
+          y={(viewTop - WORLD_BOUNDS.y) * scaleY}
+          width={viewWidth * scaleX}
+          height={viewHeight * scaleY}
+          fill="none"
+          stroke="#ffffff"
+          strokeWidth="1.5"
+        />
+      </svg>
     </div>
   );
 }
@@ -1772,5 +1966,53 @@ const styles: Record<string, React.CSSProperties> = {
   saveText: {
     fontSize: 12,
     color: "#dce7ff",
+  },
+  zoomControls: {
+    position: "absolute",
+    right: 14,
+    top: 14,
+    display: "flex",
+    gap: 8,
+    zIndex: 20,
+  },
+  zoomBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    border: "1px solid #33407a",
+    background: "rgba(18,25,55,.95)",
+    color: "#fff",
+    cursor: "pointer",
+    fontSize: 22,
+    lineHeight: 1,
+  },
+  zoomResetBtn: {
+    height: 36,
+    borderRadius: 10,
+    border: "1px solid #33407a",
+    background: "rgba(18,25,55,.95)",
+    color: "#fff",
+    cursor: "pointer",
+    padding: "0 12px",
+    fontSize: 13,
+  },
+  minimapWrap: {
+    position: "absolute",
+    right: 14,
+    bottom: 14,
+    width: 220,
+    height: 150,
+    borderRadius: 12,
+    overflow: "hidden",
+    border: "1px solid #33407a",
+    background: "rgba(18,25,55,.96)",
+    zIndex: 20,
+    boxShadow: "0 8px 24px rgba(0,0,0,.28)",
+  },
+  minimapSvg: {
+    width: "100%",
+    height: "100%",
+    display: "block",
+    cursor: "pointer",
   },
 };
