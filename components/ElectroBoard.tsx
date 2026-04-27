@@ -161,6 +161,13 @@ type InteractionState = {
   initialShape: Shape;
 };
 
+type PendingMoveState = {
+  shapeId: string;
+  startPointer: { x: number; y: number };
+  startScreen: { x: number; y: number };
+  initialShape: Shape;
+};
+
 type PendingInteractionState = {
   candidateMode: HandleType;
   shapeId: string;
@@ -233,6 +240,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   const [, setPendingInteraction] = useState<PendingInteractionState | null>(null);
   const [draftLine, setDraftLine] = useState<LineShape | null>(null);
   const [interaction, setInteraction] = useState<InteractionState | null>(null);
+  const [pendingMove, setPendingMove] = useState<PendingMoveState | null>(null);
   const [calibrationPoints, setCalibrationPoints] = useState<CalibrationPoint[]>([]);
   const [metersPerPixel, setMetersPerPixel] = useState(0);
   const [calibrationDistanceMeters, setCalibrationDistanceMeters] = useState("1");
@@ -526,6 +534,7 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
     setSelectedId(null);
     setTransformModeId(null);
     setInteraction(null);
+    setPendingMove(null);
     setDraftLine(null);
     setHoverAnchorState(null);
     setPendingInteraction(null);
@@ -980,6 +989,7 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
       if (selectedShape && !isShapeLocked(selectedShape)) {
         const handle = hitTestHandleScreen(screenPoint, selectedShape, camera);
         if (handle) {
+          setPendingMove(null);
           setInteraction({
             mode: handle,
             shapeId: selectedShape.id,
@@ -1205,6 +1215,29 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
       return;
     }
 
+    if (!interaction && pendingMove) {
+      const dragDistance = distance(
+        screenPoint.x,
+        screenPoint.y,
+        pendingMove.startScreen.x,
+        pendingMove.startScreen.y
+      );
+
+      if (dragDistance < 4) {
+        setCanvasCursor("move");
+        return;
+      }
+
+      setInteraction({
+        mode: "move",
+        shapeId: pendingMove.shapeId,
+        startPointer: pendingMove.startPointer,
+        initialShape: cloneDeep(pendingMove.initialShape),
+      });
+      setPendingMove(null);
+      return;
+    }
+
     if (!interaction) {
       if (selectedShape && !isShapeLocked(selectedShape)) {
         const hoveredHandle = hitTestHandleScreen(screenPoint, selectedShape, camera);
@@ -1404,6 +1437,7 @@ setCanvasCursor("grab");
     setCalibrationPoints([]);
     setPendingInteraction(null);
     setInteraction(null);
+    setPendingMove(null);
     setPanState(null);
     setHoverAnchorState(null);
     setPendingInteraction(null);
