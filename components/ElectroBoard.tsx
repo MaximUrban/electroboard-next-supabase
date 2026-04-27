@@ -3,6 +3,11 @@
 import Link from "next/link";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getProjectById, saveProject } from "@/lib/projects";
+import DeviceLibraryModal from "@/components/DeviceLibraryModal";
+import type {
+  DeviceLibraryItem,
+  LibraryCountry,
+} from "@/lib/device-library";
 
 type Tool =
   | "select"
@@ -28,7 +33,14 @@ type ShapeStyle = {
 
 type BaseShape = ShapeStyle & {
   id: string;
-  type: "rectangle" | "circle" | "line" | "cable" | "socket" | "switch";
+  type:
+    | "rectangle"
+    | "circle"
+    | "line"
+    | "cable"
+    | "socket"
+    | "switch"
+    | "device";
   label: string;
   groupName?: string;
   cableType?: string;
@@ -80,12 +92,28 @@ type SwitchShape = BaseShape & {
   height: number;
 };
 
+type DeviceShape = BaseShape & {
+  type: "device";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  imageUrl?: string;
+  article: string;
+  brand: string;
+  series: string;
+  modules: number;
+  categoryLabel: string;
+  country: LibraryCountry;
+};
+
 type Shape =
   | RectangleShape
   | CircleShape
   | LineShape
   | SocketShape
-  | SwitchShape;
+  | SwitchShape
+  | DeviceShape;
 
 type CalibrationPoint = {
   x: number;
@@ -137,6 +165,17 @@ type PanState = {
   startCamera: CameraState;
 };
 
+type HoverAnchorState = {
+  shapeId: string;
+  anchors: AnchorPoint[];
+  snap?: {
+    shapeId: string;
+    anchorId: string;
+    x: number;
+    y: number;
+  } | null;
+};
+
 const defaultStyle: ShapeStyle = {
   strokeColor: "#7fa7ff",
   fillColor: "#4b70ff",
@@ -173,6 +212,9 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   const [panState, setPanState] = useState<PanState | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [libraryCountry, setLibraryCountry] = useState<LibraryCountry>("FR");
+  const [hoverAnchorState, setHoverAnchorState] = useState<HoverAnchorState | null>(null);
   const [canvasSize] = useState({ width: 1400, height: 900 });
 
   const [history, setHistory] = useState<HistoryState[]>([]);
@@ -200,6 +242,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       setShapes(nextShapes);
       setMetersPerPixel(nextMetersPerPixel);
       setCalibrationPoints(nextCalibration);
+      setLibraryCountry((saved.data?.libraryCountry as LibraryCountry) || "FR");
       setLastSavedAt(saved.updatedAt || null);
 
       const initial: HistoryState = {
@@ -248,7 +291,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [loaded, projectId, shapes, calibrationPoints, metersPerPixel, projectName]);
+  }, [loaded, projectId, shapes, calibrationPoints, metersPerPixel, projectName, libraryCountry]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -321,6 +364,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
         shapes: data.shapes,
         metersPerPixel: data.metersPerPixel,
         calibrationPoints: data.calibrationPoints,
+        libraryCountry,
       },
     });
 
@@ -388,6 +432,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     setSelectedId(null);
     setInteraction(null);
     setDraftLine(null);
+    setHoverAnchorState(null);
     persistProjectData(state, false);
     setStatus("История применена");
   }
@@ -427,6 +472,34 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       x: (screenX - camera.x) / camera.zoom,
       y: (screenY - camera.y) / camera.zoom,
     };
+  }
+
+  function updateHoverAnchors(point: { x: number; y: number }, excludeLineId?: string) {
+    const targetShape = [...shapes]
+      .reverse()
+      .find((shape) => {
+        if (shape.id === excludeLineId) return false;
+        if (shape.type === "line" || shape.type === "cable") return false;
+        return isPointOnShape(point.x, point.y, shape);
+      });
+
+    if (!targetShape) {
+      setHoverAnchorState(null);
+      return;
+    }
+
+    const anchors = getShapeAnchors(targetShape);
+    const snap = findClosestAnchor(shapes, point, 26, excludeLineId);
+
+    setHoverAnchorState({
+      shapeId: targetShape.id,
+      anchors,
+      snap: snap && snap.shapeId === targetShape.id ? snap : null,
+    });
+  }
+
+  function clearHoverAnchors() {
+    setHoverAnchorState(null);
   }
 
   function setShapePatch(id: string, patch: Partial<Shape>) {
@@ -490,6 +563,12 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       return copy;
     }
 
+    if (copy.type === "device") {
+      copy.x += 20;
+      copy.y += 20;
+      return copy;
+    }
+
     copy.x += 20;
     copy.y += 20;
     return copy;
@@ -541,6 +620,45 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     });
   }
 
+  function addDeviceFromLibrary(item: DeviceLibraryItem) {
+    const modules = Math.max(1, item.modules || 1);
+    const width = Math.max(60, modules * 42);
+    const height = 120;
+
+    const centerWorld = screenToWorld(canvasSize.width / 2, canvasSize.height / 2);
+
+    const shape: DeviceShape = {
+      id: crypto.randomUUID(),
+      type: "device",
+      x: centerWorld.x - width / 2,
+      y: centerWorld.y - height / 2,
+      width,
+      height,
+      imageUrl: item.imageUrl,
+      article: item.article,
+      brand: item.brand,
+      series: item.series,
+      modules: item.modules,
+      categoryLabel: item.categoryLabel,
+      country: item.country,
+      label: item.name,
+      groupName: "",
+      cableType: "",
+      ...defaultStyle,
+      fillColor: "#1b2347",
+      opacity: 1,
+    };
+
+    setShapes((prev) => {
+      const next = [...prev, shape];
+      window.setTimeout(() => commitHistory(next), 0);
+      return next;
+    });
+
+    setSelectedId(shape.id);
+    setShowLibrary(false);
+  }
+
   function handleCanvasMouseDown(e: React.MouseEvent<SVGSVGElement>) {
     const screenPoint = getScreenPoint(e.clientX, e.clientY);
     const point = screenToWorld(screenPoint.x, screenPoint.y);
@@ -574,6 +692,9 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
             startPointer: point,
             initialShape: cloneDeep(selectedShape),
           });
+          if (handle === "line-start" || handle === "line-end") {
+            updateHoverAnchors(point, selectedShape.id);
+          }
           return;
         }
       }
@@ -705,13 +826,18 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     }
 
     if (tool === "line" || tool === "cable") {
+      const startSnap = findClosestAnchor(shapes, point, 26);
+
+      const startX = startSnap ? startSnap.x : point.x;
+      const startY = startSnap ? startSnap.y : point.y;
+
       const shape: LineShape = {
         id: crypto.randomUUID(),
         type: tool,
-        x: point.x,
-        y: point.y,
-        x2: point.x + 1,
-        y2: point.y + 1,
+        x: startX,
+        y: startY,
+        x2: startX + 1,
+        y2: startY + 1,
         label: tool === "cable" ? "Кабель" : "Линия",
         cableType: tool === "cable" ? "ВВГнг 3x2.5" : "",
         groupName: "",
@@ -720,9 +846,14 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
         opacity: 1,
         strokeColor: tool === "cable" ? "#ffbf47" : "#7fa7ff",
         strokeWidth: tool === "cable" ? 4 : 2,
+        startAttachment: startSnap
+          ? { shapeId: startSnap.shapeId, anchorId: startSnap.anchorId }
+          : undefined,
       };
+
       setDraftLine(shape);
       setSelectedId(shape.id);
+      updateHoverAnchors(point, shape.id);
     }
   }
 
@@ -743,16 +874,44 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     }
 
     if (draftLine) {
-      const snapped = orthogonalSnap({ x: draftLine.x, y: draftLine.y }, point, 2);
-      setDraftLine((prev) => (prev ? { ...prev, x2: snapped.x, y2: snapped.y } : null));
+      updateHoverAnchors(point, draftLine.id);
+
+      const snappedOrtho = orthogonalSnap({ x: draftLine.x, y: draftLine.y }, point, 2);
+      const snap = findClosestAnchor(shapes, snappedOrtho, 26, draftLine.id);
+
+      setDraftLine((prev) =>
+        prev
+          ? {
+              ...prev,
+              x2: snap ? snap.x : snappedOrtho.x,
+              y2: snap ? snap.y : snappedOrtho.y,
+              endAttachment: snap
+                ? { shapeId: snap.shapeId, anchorId: snap.anchorId }
+                : undefined,
+            }
+          : null
+      );
       return;
     }
 
-    if (!interaction) return;
+    if (!interaction) {
+      if (tool === "line" || tool === "cable") {
+        updateHoverAnchors(point);
+      } else {
+        clearHoverAnchors();
+      }
+      return;
+    }
+
+    if (interaction.mode === "line-start" || interaction.mode === "line-end") {
+      updateHoverAnchors(point, interaction.shapeId);
+    } else {
+      clearHoverAnchors();
+    }
 
     setShapes((prev) => {
       const updated = prev.map((shape) =>
-        shape.id === interaction.shapeId ? transformShape(shape, interaction, point) : shape
+        shape.id === interaction.shapeId ? transformShape(shape, interaction, point, prev) : shape
       );
       return applyAttachments(updated);
     });
@@ -760,14 +919,35 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
   function handleCanvasMouseUp() {
     if (draftLine) {
-      setShapes((prev) => {
-        const next = [...prev, draftLine];
-        window.setTimeout(() => commitHistory(next), 0);
-        return next;
-      });
+      const finalized = applyAttachments(
+        shapes.concat(draftLine).map((shape) => {
+          if (shape.id !== draftLine.id) return shape;
+          if (shape.type !== "line" && shape.type !== "cable") return shape;
+
+          const snap = findClosestAnchor(
+            shapes,
+            { x: shape.x2, y: shape.y2 },
+            26,
+            shape.id
+          );
+
+          return snap
+            ? {
+                ...shape,
+                x2: snap.x,
+                y2: snap.y,
+                endAttachment: { shapeId: snap.shapeId, anchorId: snap.anchorId },
+              }
+            : shape;
+        })
+      );
+
+      setShapes(finalized);
+      window.setTimeout(() => commitHistory(finalized), 0);
       setDraftLine(null);
       setTool("select");
       setPanState(null);
+      clearHoverAnchors();
       return;
     }
 
@@ -782,7 +962,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
               ? { x: shape.x, y: shape.y }
               : { x: shape.x2, y: shape.y2 };
 
-          const snap = findClosestAnchor(prev, endpoint, 22, shape.id);
+          const snap = findClosestAnchor(prev, endpoint, 26, shape.id);
 
           if (!snap) {
             return interaction.mode === "line-start"
@@ -819,6 +999,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
     setInteraction(null);
     setPanState(null);
+    clearHoverAnchors();
   }
 
   function handleWheel(e: React.WheelEvent<SVGSVGElement>) {
@@ -845,6 +1026,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     setCalibrationPoints([]);
     setInteraction(null);
     setPanState(null);
+    setHoverAnchorState(null);
     setShowClearConfirm(false);
     setStatus("Проект очищен");
     window.setTimeout(() => commitHistory([], [], 0), 0);
@@ -858,12 +1040,14 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
             { value: "line", label: "Линия" },
             { value: "cable", label: "Кабель" },
           ]
-        : [
-            { value: "rectangle", label: "Прямоугольник" },
-            { value: "circle", label: "Окружность" },
-            { value: "socket", label: "Розетка" },
-            { value: "switch", label: "Выключатель" },
-          ];
+        : selectedShape.type === "device"
+          ? [{ value: "device", label: "Устройство" }]
+          : [
+              { value: "rectangle", label: "Прямоугольник" },
+              { value: "circle", label: "Окружность" },
+              { value: "socket", label: "Розетка" },
+              { value: "switch", label: "Выключатель" },
+            ];
 
   return (
     <div style={styles.page}>
@@ -913,6 +1097,10 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
             Масштаб
           </button>
 
+          <button style={styles.btn} onClick={() => setShowLibrary(true)}>
+            Библиотека
+          </button>
+
           <button style={styles.iconBtn} onClick={undo} title="Undo">
             <IconUndo />
           </button>
@@ -945,7 +1133,10 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
               onMouseDown={handleCanvasMouseDown}
               onMouseMove={handleCanvasMouseMove}
               onMouseUp={handleCanvasMouseUp}
-              onMouseLeave={handleCanvasMouseUp}
+              onMouseLeave={() => {
+                handleCanvasMouseUp();
+                clearHoverAnchors();
+              }}
               onWheel={handleWheel}
             >
               <defs>
@@ -971,6 +1162,30 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
                 ))}
 
                 {draftLine ? renderShape(draftLine, true) : null}
+
+                {hoverAnchorState ? (
+                  <g pointerEvents="none">
+                    {hoverAnchorState.anchors.map((anchor) => {
+                      const active =
+                        hoverAnchorState.snap &&
+                        hoverAnchorState.snap.anchorId === anchor.id &&
+                        hoverAnchorState.snap.shapeId === hoverAnchorState.shapeId;
+
+                      return (
+                        <circle
+                          key={`${hoverAnchorState.shapeId}-${anchor.id}`}
+                          cx={anchor.x}
+                          cy={anchor.y}
+                          r={active ? 8 : 5}
+                          fill={active ? "#00e7a7" : "#9ec1ff"}
+                          stroke="#ffffff"
+                          strokeWidth={active ? 2.5 : 1.5}
+                          opacity={active ? 1 : 0.92}
+                        />
+                      );
+                    })}
+                  </g>
+                ) : null}
 
                 {calibrationPoints.map((p, i) => (
                   <g key={`${p.x}-${p.y}-${i}`}>
@@ -1069,6 +1284,30 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
                     style={styles.inputCompact}
                   />
                 </div>
+
+                {selectedShape.type === "device" ? (
+                  <>
+                    <div style={styles.compactField}>
+                      <label style={styles.label}>Артикул</label>
+                      <input value={selectedShape.article} readOnly style={styles.inputCompact} />
+                    </div>
+
+                    <div style={styles.compactField}>
+                      <label style={styles.label}>Серия</label>
+                      <input value={selectedShape.series} readOnly style={styles.inputCompact} />
+                    </div>
+
+                    <div style={styles.compactField}>
+                      <label style={styles.label}>Модули</label>
+                      <input value={String(selectedShape.modules)} readOnly style={styles.inputCompact} />
+                    </div>
+
+                    <div style={styles.compactField}>
+                      <label style={styles.label}>Страна каталога</label>
+                      <input value={selectedShape.country} readOnly style={styles.inputCompact} />
+                    </div>
+                  </>
+                ) : null}
 
                 <div style={styles.compactField}>
                   <label style={styles.label}>Группа</label>
@@ -1241,6 +1480,14 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
         </span>
       </button>
 
+      <DeviceLibraryModal
+        open={showLibrary}
+        initialCountry={libraryCountry}
+        onClose={() => setShowLibrary(false)}
+        onCountryChange={setLibraryCountry}
+        onAdd={addDeviceFromLibrary}
+      />
+
       {showHelp ? (
         <Modal title="Горячие клавиши" onClose={() => setShowHelp(false)}>
           <div style={styles.modalList}>
@@ -1359,7 +1606,7 @@ function MiniMap({
             );
           }
 
-          if (shape.type === "rectangle") {
+          if (shape.type === "rectangle" || shape.type === "device") {
             const p = worldToMini(shape.x, shape.y);
             return (
               <rect
@@ -1559,6 +1806,55 @@ function renderShape(shape: Shape, selected: boolean) {
     );
   }
 
+  if (shape.type === "device") {
+    const cx = shape.x + shape.width / 2;
+    const cy = shape.y + shape.height / 2;
+
+    return (
+      <g transform={`rotate(${shape.rotation} ${cx} ${cy})`}>
+        <rect
+          x={shape.x}
+          y={shape.y}
+          width={shape.width}
+          height={shape.height}
+          rx="10"
+          fill={hexToRgba(shape.fillColor, 0.95)}
+          stroke={stroke}
+          strokeWidth={sw}
+        />
+
+        {shape.imageUrl ? (
+          <image
+            href={shape.imageUrl}
+            x={shape.x + 8}
+            y={shape.y + 8}
+            width={shape.width - 16}
+            height={shape.height - 34}
+            preserveAspectRatio="xMidYMid meet"
+          />
+        ) : null}
+
+        <text
+          x={shape.x + 8}
+          y={shape.y + shape.height - 10}
+          fill="#f2f6ff"
+          fontSize="11"
+        >
+          {shape.article}
+        </text>
+
+        <text
+          x={shape.x}
+          y={shape.y - 10}
+          fill="#f2f6ff"
+          fontSize="14"
+        >
+          {shape.label}
+        </text>
+      </g>
+    );
+  }
+
   return null;
 }
 
@@ -1588,7 +1884,12 @@ function renderSelectionOverlay(shape: Shape) {
     );
   }
 
-  if (shape.type === "rectangle" || shape.type === "socket" || shape.type === "switch") {
+  if (
+    shape.type === "rectangle" ||
+    shape.type === "socket" ||
+    shape.type === "switch" ||
+    shape.type === "device"
+  ) {
     const geometry = getSelectionGeometry(shape);
     return (
       <g>
@@ -1614,6 +1915,10 @@ function renderSelectionOverlay(shape: Shape) {
 }
 
 function convertShapeType(shape: Shape, nextType: Shape["type"]): Shape {
+  if (shape.type === "device" || nextType === "device") {
+    return shape;
+  }
+
   if (shape.type === nextType) return shape;
 
   if ((shape.type === "line" || shape.type === "cable") && (nextType === "line" || nextType === "cable")) {
@@ -1638,7 +1943,11 @@ function convertShapeType(shape: Shape, nextType: Shape["type"]): Shape {
 
     if (shape.type === "circle") {
       radius = shape.radius;
-    } else if (shape.type === "rectangle" || shape.type === "socket" || shape.type === "switch") {
+    } else if (
+      shape.type === "rectangle" ||
+      shape.type === "socket" ||
+      shape.type === "switch"
+    ) {
       radius = Math.max(18, shape.width / 2, shape.height / 2);
     }
 
@@ -1667,7 +1976,11 @@ function convertShapeType(shape: Shape, nextType: Shape["type"]): Shape {
     if (shape.type === "circle") {
       width = shape.radius * 2;
       height = shape.radius * 2;
-    } else if (shape.type === "rectangle" || shape.type === "socket" || shape.type === "switch") {
+    } else if (
+      shape.type === "rectangle" ||
+      shape.type === "socket" ||
+      shape.type === "switch"
+    ) {
       width = shape.width;
       height = shape.height;
     }
@@ -1698,7 +2011,11 @@ function convertShapeType(shape: Shape, nextType: Shape["type"]): Shape {
     if (shape.type === "circle") {
       width = Math.max(36, shape.radius * 2);
       height = Math.max(36, shape.radius * 2);
-    } else if (shape.type === "rectangle" || shape.type === "socket" || shape.type === "switch") {
+    } else if (
+      shape.type === "rectangle" ||
+      shape.type === "socket" ||
+      shape.type === "switch"
+    ) {
       width = Math.max(24, shape.width);
       height = Math.max(24, shape.height);
     }
@@ -1726,7 +2043,7 @@ function convertShapeType(shape: Shape, nextType: Shape["type"]): Shape {
 }
 
 function getShapeCenter(shape: Shape) {
-  if (shape.type === "rectangle") {
+  if (shape.type === "rectangle" || shape.type === "device") {
     return { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 };
   }
   if (shape.type === "circle") {
@@ -1738,7 +2055,12 @@ function getShapeCenter(shape: Shape) {
   return { x: (shape.x + shape.x2) / 2, y: (shape.y + shape.y2) / 2 };
 }
 
-function transformShape(shape: Shape, interaction: InteractionState, point: { x: number; y: number }): Shape {
+function transformShape(
+  shape: Shape,
+  interaction: InteractionState,
+  point: { x: number; y: number },
+  allShapes: Shape[]
+): Shape {
   const dx = point.x - interaction.startPointer.x;
   const dy = point.y - interaction.startPointer.y;
   const initial = interaction.initialShape;
@@ -1765,18 +2087,39 @@ function transformShape(shape: Shape, interaction: InteractionState, point: { x:
       return { ...shape, x: s.x + dx, y: s.y + dy };
     }
 
+    if (shape.type === "device") {
+      const s = initial as DeviceShape;
+      return { ...shape, x: s.x + dx, y: s.y + dy };
+    }
+
     const s = initial as SocketShape | SwitchShape;
     return { ...shape, x: s.x + dx, y: s.y + dy };
   }
 
   if (interaction.mode === "line-start" && (shape.type === "line" || shape.type === "cable")) {
     const snapped = orthogonalSnap({ x: shape.x2, y: shape.y2 }, point, 2);
-    return { ...shape, x: snapped.x, y: snapped.y, startAttachment: undefined };
+    const snap = findClosestAnchor(allShapes, snapped, 26, shape.id);
+    return {
+      ...shape,
+      x: snap ? snap.x : snapped.x,
+      y: snap ? snap.y : snapped.y,
+      startAttachment: snap
+        ? { shapeId: snap.shapeId, anchorId: snap.anchorId }
+        : undefined,
+    };
   }
 
   if (interaction.mode === "line-end" && (shape.type === "line" || shape.type === "cable")) {
     const snapped = orthogonalSnap({ x: shape.x, y: shape.y }, point, 2);
-    return { ...shape, x2: snapped.x, y2: snapped.y, endAttachment: undefined };
+    const snap = findClosestAnchor(allShapes, snapped, 26, shape.id);
+    return {
+      ...shape,
+      x2: snap ? snap.x : snapped.x,
+      y2: snap ? snap.y : snapped.y,
+      endAttachment: snap
+        ? { shapeId: snap.shapeId, anchorId: snap.anchorId }
+        : undefined,
+    };
   }
 
   if (interaction.mode === "resize-circle" && shape.type === "circle") {
@@ -1796,6 +2139,15 @@ function transformShape(shape: Shape, interaction: InteractionState, point: { x:
       };
     }
 
+    if (shape.type === "device") {
+      const s = initial as DeviceShape;
+      return {
+        ...shape,
+        width: Math.max(40, s.width + dx),
+        height: Math.max(60, s.height + dy),
+      };
+    }
+
     if (shape.type === "socket" || shape.type === "switch") {
       const s = initial as SocketShape | SwitchShape;
       return {
@@ -1809,6 +2161,13 @@ function transformShape(shape: Shape, interaction: InteractionState, point: { x:
   if (interaction.mode === "rotate") {
     if (shape.type === "rectangle") {
       const s = initial as RectangleShape;
+      const cx = s.x + s.width / 2;
+      const cy = s.y + s.height / 2;
+      return { ...shape, rotation: angleDeg(cx, cy, point.x, point.y) + 90 };
+    }
+
+    if (shape.type === "device") {
+      const s = initial as DeviceShape;
       const cx = s.x + s.width / 2;
       const cy = s.y + s.height / 2;
       return { ...shape, rotation: angleDeg(cx, cy, point.x, point.y) + 90 };
@@ -1838,7 +2197,12 @@ function hitTestHandle(px: number, py: number, shape: Shape): HandleType | null 
     return null;
   }
 
-  if (shape.type === "rectangle" || shape.type === "socket" || shape.type === "switch") {
+  if (
+    shape.type === "rectangle" ||
+    shape.type === "socket" ||
+    shape.type === "switch" ||
+    shape.type === "device"
+  ) {
     const geometry = getSelectionGeometry(shape);
     if (distance(px, py, geometry.rotateHandle.x, geometry.rotateHandle.y) <= 12) return "rotate";
     if (distance(px, py, geometry.resizeHandle.x, geometry.resizeHandle.y) <= 12) return "resize-se";
@@ -1847,8 +2211,10 @@ function hitTestHandle(px: number, py: number, shape: Shape): HandleType | null 
   return null;
 }
 
-function getSelectionGeometry(shape: RectangleShape | SocketShape | SwitchShape) {
-  if (shape.type === "rectangle") {
+function getSelectionGeometry(
+  shape: RectangleShape | SocketShape | SwitchShape | DeviceShape
+) {
+  if (shape.type === "rectangle" || shape.type === "device") {
     const cx = shape.x + shape.width / 2;
     const cy = shape.y + shape.height / 2;
 
@@ -1917,6 +2283,22 @@ function getShapeAnchors(shape: Shape): AnchorPoint[] {
   }
 
   if (shape.type === "rectangle") {
+    const cx = shape.x + shape.width / 2;
+    const cy = shape.y + shape.height / 2;
+    const raw = [
+      { id: "center", x: cx, y: cy },
+      { id: "top", x: shape.x + shape.width / 2, y: shape.y },
+      { id: "right", x: shape.x + shape.width, y: shape.y + shape.height / 2 },
+      { id: "bottom", x: shape.x + shape.width / 2, y: shape.y + shape.height },
+      { id: "left", x: shape.x, y: shape.y + shape.height / 2 },
+    ];
+
+    return raw.map((a) =>
+      a.id === "center" ? a : { id: a.id, ...rotatePoint(a.x, a.y, cx, cy, shape.rotation) }
+    );
+  }
+
+  if (shape.type === "device") {
     const cx = shape.x + shape.width / 2;
     const cy = shape.y + shape.height / 2;
     const raw = [
@@ -2064,6 +2446,15 @@ function isPointOnShape(px: number, py: number, shape: Shape) {
       px <= shape.x + shape.width / 2 &&
       py >= shape.y - shape.height / 2 &&
       py <= shape.y + shape.height / 2
+    );
+  }
+
+  if (shape.type === "device") {
+    return (
+      px >= shape.x &&
+      px <= shape.x + shape.width &&
+      py >= shape.y &&
+      py <= shape.y + shape.height
     );
   }
 
