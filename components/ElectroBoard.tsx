@@ -3193,167 +3193,197 @@ function transformShape(
     shape.type === "switch" ||
     shape.type === "cad";
 
-  if ((isCornerResizeHandle(interaction.mode) || isSideResizeHandle(interaction.mode)) && isRectLike) {
+  if (
+    (isCornerResizeHandle(interaction.mode) || isSideResizeHandle(interaction.mode)) &&
+    isRectLike
+  ) {
     const s = initial as RectangleShape | SocketShape | SwitchShape | CadShape;
     const keepAspectRatio = Boolean(interaction.keepAspectRatio);
     const resizeFromCenter = Boolean(interaction.resizeFromCenter);
+    const minSize = 16;
 
-    let left: number;
-    let top: number;
-    let width: number;
-    let height: number;
+    const initialCenter = getShapeCenter(s);
+    const rotation = s.rotation || 0;
+    const ratio = s.width / Math.max(s.height, 1);
 
-    if (s.type === "rectangle" || s.type === "cad") {
-      left = s.x;
-      top = s.y;
-      width = s.width;
-      height = s.height;
-    } else {
-      left = s.x - s.width / 2;
-      top = s.y - s.height / 2;
-      width = s.width;
-      height = s.height;
-    }
+    const localPointer = worldToLocalPoint(
+      point.x,
+      point.y,
+      initialCenter.x,
+      initialCenter.y,
+      rotation
+    );
 
-    const centerX = left + width / 2;
-    const centerY = top + height / 2;
-    const ratio = width / Math.max(height, 1);
+    const initialLeft = -s.width / 2;
+    const initialRight = s.width / 2;
+    const initialTop = -s.height / 2;
+    const initialBottom = s.height / 2;
 
-    let nextLeft = left;
-    let nextTop = top;
-    let nextWidth = width;
-    let nextHeight = height;
+    let nextLeft = initialLeft;
+    let nextRight = initialRight;
+    let nextTop = initialTop;
+    let nextBottom = initialBottom;
 
     if (resizeFromCenter) {
-      if (isCornerResizeHandle(interaction.mode)) {
-        const cornerSignX =
-          interaction.mode === "resize-ne" || interaction.mode === "resize-se" ? 1 : -1;
-        const cornerSignY =
-          interaction.mode === "resize-sw" || interaction.mode === "resize-se" ? 1 : -1;
-
-        let widthDelta = cornerSignX * dx * 2;
-        let heightDelta = cornerSignY * dy * 2;
-
-        if (keepAspectRatio) {
-          const widthFromHeight = heightDelta * ratio;
-          const heightFromWidth = widthDelta / Math.max(ratio, 0.0001);
-
-          if (Math.abs(widthDelta) >= Math.abs(widthFromHeight)) {
-            widthDelta = widthFromHeight;
-          } else {
-            heightDelta = heightFromWidth;
-          }
+      switch (interaction.mode) {
+        case "resize-e":
+        case "resize-w": {
+          const halfWidth = Math.max(minSize / 2, Math.abs(localPointer.x));
+          nextLeft = -halfWidth;
+          nextRight = halfWidth;
+          break;
         }
 
-        nextWidth = Math.max(16, width + widthDelta);
-        nextHeight = Math.max(16, keepAspectRatio ? nextWidth / ratio : height + heightDelta);
-        if (keepAspectRatio) {
-          nextWidth = Math.max(16, nextHeight * ratio);
+        case "resize-n":
+        case "resize-s": {
+          const halfHeight = Math.max(minSize / 2, Math.abs(localPointer.y));
+          nextTop = -halfHeight;
+          nextBottom = halfHeight;
+          break;
+        }
+
+        case "resize-se":
+        case "resize-sw":
+        case "resize-ne":
+        case "resize-nw": {
+          let halfWidth = Math.max(minSize / 2, Math.abs(localPointer.x));
+          let halfHeight = Math.max(minSize / 2, Math.abs(localPointer.y));
+
+          if (keepAspectRatio) {
+            const widthFromHeight = halfHeight * ratio;
+            const heightFromWidth = halfWidth / Math.max(ratio, 0.0001);
+
+            if (halfWidth >= widthFromHeight) {
+              halfWidth = widthFromHeight;
+            } else {
+              halfHeight = heightFromWidth;
+            }
+          }
+
+          nextLeft = -halfWidth;
+          nextRight = halfWidth;
+          nextTop = -halfHeight;
+          nextBottom = halfHeight;
+          break;
         }
       }
 
-      if (isSideResizeHandle(interaction.mode)) {
+      if (keepAspectRatio && isSideResizeHandle(interaction.mode)) {
         if (interaction.mode === "resize-e" || interaction.mode === "resize-w") {
-          const sign = interaction.mode === "resize-e" ? 1 : -1;
-          nextWidth = Math.max(16, width + sign * dx * 2);
-
-          if (keepAspectRatio) {
-            nextHeight = Math.max(16, nextWidth / ratio);
-          }
-        }
-
-        if (interaction.mode === "resize-n" || interaction.mode === "resize-s") {
-          const sign = interaction.mode === "resize-s" ? 1 : -1;
-          nextHeight = Math.max(16, height + sign * dy * 2);
-
-          if (keepAspectRatio) {
-            nextWidth = Math.max(16, nextHeight * ratio);
-          }
+          const halfWidth = (nextRight - nextLeft) / 2;
+          const halfHeight = Math.max(minSize / 2, halfWidth / Math.max(ratio, 0.0001));
+          nextTop = -halfHeight;
+          nextBottom = halfHeight;
+        } else {
+          const halfHeight = (nextBottom - nextTop) / 2;
+          const halfWidth = Math.max(minSize / 2, halfHeight * ratio);
+          nextLeft = -halfWidth;
+          nextRight = halfWidth;
         }
       }
-
-      nextLeft = centerX - nextWidth / 2;
-      nextTop = centerY - nextHeight / 2;
     } else {
-      if (isCornerResizeHandle(interaction.mode)) {
-        if (interaction.mode === "resize-se") {
-          nextWidth = Math.max(16, width + dx);
-          nextHeight = Math.max(16, height + dy);
-        }
+      switch (interaction.mode) {
+        case "resize-e":
+          nextRight = Math.max(initialLeft + minSize, localPointer.x);
+          break;
 
-        if (interaction.mode === "resize-sw") {
-          nextWidth = Math.max(16, width - dx);
-          nextHeight = Math.max(16, height + dy);
-          nextLeft = left + (width - nextWidth);
-        }
+        case "resize-w":
+          nextLeft = Math.min(initialRight - minSize, localPointer.x);
+          break;
 
-        if (interaction.mode === "resize-ne") {
-          nextWidth = Math.max(16, width + dx);
-          nextHeight = Math.max(16, height - dy);
-          nextTop = top + (height - nextHeight);
-        }
+        case "resize-s":
+          nextBottom = Math.max(initialTop + minSize, localPointer.y);
+          break;
 
-        if (interaction.mode === "resize-nw") {
-          nextWidth = Math.max(16, width - dx);
-          nextHeight = Math.max(16, height - dy);
-          nextLeft = left + (width - nextWidth);
-          nextTop = top + (height - nextHeight);
-        }
+        case "resize-n":
+          nextTop = Math.min(initialBottom - minSize, localPointer.y);
+          break;
 
-        if (keepAspectRatio) {
-          if (interaction.mode === "resize-se" || interaction.mode === "resize-nw") {
-            const size = Math.max(nextWidth, nextHeight * ratio, 16);
-            nextWidth = size;
-            nextHeight = size / ratio;
-          } else {
-            const size = Math.max(nextWidth, nextHeight * ratio, 16);
-            nextWidth = size;
-            nextHeight = size / ratio;
-          }
+        case "resize-se":
+          nextRight = Math.max(initialLeft + minSize, localPointer.x);
+          nextBottom = Math.max(initialTop + minSize, localPointer.y);
+          break;
 
-          if (interaction.mode === "resize-sw" || interaction.mode === "resize-nw") {
-            nextLeft = left + (width - nextWidth);
-          }
+        case "resize-sw":
+          nextLeft = Math.min(initialRight - minSize, localPointer.x);
+          nextBottom = Math.max(initialTop + minSize, localPointer.y);
+          break;
 
-          if (interaction.mode === "resize-ne" || interaction.mode === "resize-nw") {
-            nextTop = top + (height - nextHeight);
-          }
-        }
+        case "resize-ne":
+          nextRight = Math.max(initialLeft + minSize, localPointer.x);
+          nextTop = Math.min(initialBottom - minSize, localPointer.y);
+          break;
+
+        case "resize-nw":
+          nextLeft = Math.min(initialRight - minSize, localPointer.x);
+          nextTop = Math.min(initialBottom - minSize, localPointer.y);
+          break;
       }
 
-      if (isSideResizeHandle(interaction.mode)) {
-        if (interaction.mode === "resize-e") {
-          nextWidth = Math.max(16, width + dx);
-        }
-        if (interaction.mode === "resize-w") {
-          nextWidth = Math.max(16, width - dx);
-          nextLeft = left + (width - nextWidth);
-        }
-        if (interaction.mode === "resize-s") {
-          nextHeight = Math.max(16, height + dy);
-        }
-        if (interaction.mode === "resize-n") {
-          nextHeight = Math.max(16, height - dy);
-          nextTop = top + (height - nextHeight);
+      if (keepAspectRatio) {
+        let nextWidth = Math.max(minSize, nextRight - nextLeft);
+        let nextHeight = Math.max(minSize, nextBottom - nextTop);
+
+        if (isCornerResizeHandle(interaction.mode)) {
+          const widthFromHeight = nextHeight * ratio;
+          const heightFromWidth = nextWidth / Math.max(ratio, 0.0001);
+
+          if (nextWidth >= widthFromHeight) {
+            nextWidth = widthFromHeight;
+          } else {
+            nextHeight = heightFromWidth;
+          }
+
+          if (interaction.mode === "resize-nw" || interaction.mode === "resize-sw") {
+            nextLeft = initialRight - nextWidth;
+          } else {
+            nextRight = initialLeft + nextWidth;
+          }
+
+          if (interaction.mode === "resize-nw" || interaction.mode === "resize-ne") {
+            nextTop = initialBottom - nextHeight;
+          } else {
+            nextBottom = initialTop + nextHeight;
+          }
         }
 
-        if (keepAspectRatio) {
+        if (isSideResizeHandle(interaction.mode)) {
           if (interaction.mode === "resize-e" || interaction.mode === "resize-w") {
-            nextHeight = Math.max(16, nextWidth / ratio);
-            nextTop = top + (height - nextHeight) / 2;
+            nextHeight = Math.max(minSize, nextWidth / Math.max(ratio, 0.0001));
+            const centerYLocal = (initialTop + initialBottom) / 2;
+            nextTop = centerYLocal - nextHeight / 2;
+            nextBottom = centerYLocal + nextHeight / 2;
           } else {
-            nextWidth = Math.max(16, nextHeight * ratio);
-            nextLeft = left + (width - nextWidth) / 2;
+            nextWidth = Math.max(minSize, nextHeight * ratio);
+            const centerXLocal = (initialLeft + initialRight) / 2;
+            nextLeft = centerXLocal - nextWidth / 2;
+            nextRight = centerXLocal + nextWidth / 2;
           }
         }
       }
     }
+
+    const nextWidth = Math.max(minSize, nextRight - nextLeft);
+    const nextHeight = Math.max(minSize, nextBottom - nextTop);
+
+    const nextLocalCenter = {
+      x: (nextLeft + nextRight) / 2,
+      y: (nextTop + nextBottom) / 2,
+    };
+
+    const nextWorldCenter = localToWorldPoint(
+      nextLocalCenter.x,
+      nextLocalCenter.y,
+      initialCenter.x,
+      initialCenter.y,
+      rotation
+    );
 
     if (shape.type === "rectangle") {
       return {
         ...shape,
-        x: nextLeft,
-        y: nextTop,
+        x: nextWorldCenter.x - nextWidth / 2,
+        y: nextWorldCenter.y - nextHeight / 2,
         width: nextWidth,
         height: nextHeight,
       };
@@ -3362,8 +3392,8 @@ function transformShape(
     if (shape.type === "cad") {
       return {
         ...shape,
-        x: nextLeft,
-        y: nextTop,
+        x: nextWorldCenter.x - nextWidth / 2,
+        y: nextWorldCenter.y - nextHeight / 2,
         width: nextWidth,
         height: nextHeight,
       };
@@ -3371,8 +3401,8 @@ function transformShape(
 
     return {
       ...shape,
-      x: nextLeft + nextWidth / 2,
-      y: nextTop + nextHeight / 2,
+      x: nextWorldCenter.x,
+      y: nextWorldCenter.y,
       width: nextWidth,
       height: nextHeight,
     };
@@ -3914,6 +3944,42 @@ function snapRotationAngle(angle: number) {
   }
 
   return angle;
+}
+
+function worldToLocalPoint(
+  worldX: number,
+  worldY: number,
+  centerX: number,
+  centerY: number,
+  angleDegValue: number
+) {
+  const angle = (-angleDegValue * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const dx = worldX - centerX;
+  const dy = worldY - centerY;
+
+  return {
+    x: dx * cos - dy * sin,
+    y: dx * sin + dy * cos,
+  };
+}
+
+function localToWorldPoint(
+  localX: number,
+  localY: number,
+  centerX: number,
+  centerY: number,
+  angleDegValue: number
+) {
+  const angle = (angleDegValue * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+
+  return {
+    x: centerX + localX * cos - localY * sin,
+    y: centerY + localX * sin + localY * cos,
+  };
 }
 
 function angleDeg(cx: number, cy: number, px: number, py: number) {
