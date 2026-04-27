@@ -258,83 +258,101 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
     [shapes, metersPerPixel]
   );
 
-  useEffect(() => {
-    const saved = getProjectById(projectId);
+ useEffect(() => {
+  const saved = getProjectById(projectId);
 
-    if (saved) {
-      const nextShapes = (saved.data?.shapes || []) as Shape[];
-      const nextCadAssets = (saved.data?.cadAssets || []) as CadAsset[];
-      const nextMetersPerPixel = Number(saved.data?.metersPerPixel || 0);
-      const nextCalibration = (saved.data?.calibrationPoints || []) as CalibrationPoint[];
-      const savedCamera = saved?.data?.camera as CameraState | undefined;
+  const savedCamera = saved?.data?.camera as CameraState | undefined;
 
-const fallbackCamera: CameraState = {
-  x: canvasSize.width / 2,
-  y: canvasSize.height / 2,
-  zoom: 1,
-};
-
-const nextCamera =
-  savedCamera &&
-  typeof savedCamera.x === "number" &&
-  typeof savedCamera.y === "number" &&
-  typeof savedCamera.zoom === "number"
-    ? savedCamera
-    : fallbackCamera;
-
-      setProjectName(saved.name || "Project");
-      setShapes(nextShapes);
-      setCadAssets(nextCadAssets);
-      setMetersPerPixel(nextMetersPerPixel);
-      setCalibrationPoints(nextCalibration);
-      setLibraryCountry((saved.data?.libraryCountry as LibraryCountry) || "FR");
-      setLastSavedAt(saved.updatedAt || null);
-
-      const initial: HistoryState = {
-  shapes: cloneDeep(nextShapes),
-  cadAssets: cloneDeep(nextCadAssets),
-  calibrationPoints: cloneDeep(nextCalibration),
-  metersPerPixel: nextMetersPerPixel,
-  projectName: saved.name || "Project",
-  camera: cloneDeep(nextCamera),
-};
-
-      setHistory([initial]);
-      setHistoryIndex(0);
-    } else {
-      const initial: HistoryState = {
-  shapes: [],
-  cadAssets: [],
-  calibrationPoints: [],
-  metersPerPixel: 0,
-  projectName: "Project",
-  camera: {
+  const fallbackCamera: CameraState = {
     x: canvasSize.width / 2,
     y: canvasSize.height / 2,
     zoom: 1,
-  },
-};
-      setHistory([initial]);
-      setHistoryIndex(0);
-    }
+  };
 
-    if (saved) {
-  setCamera(nextCamera);
-} else {
-  setCamera({
-    x: canvasSize.width / 2,
-    y: canvasSize.height / 2,
-    zoom: 1,
-  });
-}
+  const nextCamera =
+    savedCamera &&
+    typeof savedCamera.x === "number" &&
+    typeof savedCamera.y === "number" &&
+    typeof savedCamera.zoom === "number"
+      ? savedCamera
+      : fallbackCamera;
 
-    setLoaded(true);
-  }, [projectId, canvasSize.width, canvasSize.height]);
+  if (saved) {
+    const nextShapes = (saved.data?.shapes || []) as Shape[];
+    const nextCadAssets = (saved.data?.cadAssets || []) as CadAsset[];
+    const nextMetersPerPixel = Number(saved.data?.metersPerPixel || 0);
+    const nextCalibration = (saved.data?.calibrationPoints || []) as CalibrationPoint[];
+
+    setProjectName(saved.name || "Project");
+    setShapes(nextShapes);
+    setCadAssets(nextCadAssets);
+    setMetersPerPixel(nextMetersPerPixel);
+    setCalibrationPoints(nextCalibration);
+    setLibraryCountry((saved.data?.libraryCountry as LibraryCountry) || "FR");
+    setLastSavedAt(saved.updatedAt || null);
+
+    const initial: HistoryState = {
+      shapes: cloneDeep(nextShapes),
+      cadAssets: cloneDeep(nextCadAssets),
+      calibrationPoints: cloneDeep(nextCalibration),
+      metersPerPixel: nextMetersPerPixel,
+      projectName: saved.name || "Project",
+      camera: cloneDeep(nextCamera),
+    };
+
+    setHistory([initial]);
+    setHistoryIndex(0);
+    setCamera(nextCamera);
+  } else {
+    const initial: HistoryState = {
+      shapes: [],
+      cadAssets: [],
+      calibrationPoints: [],
+      metersPerPixel: 0,
+      projectName: "Project",
+      camera: {
+        x: canvasSize.width / 2,
+        y: canvasSize.height / 2,
+        zoom: 1,
+      },
+    };
+
+    setHistory([initial]);
+    setHistoryIndex(0);
+    setCamera({
+      x: canvasSize.width / 2,
+      y: canvasSize.height / 2,
+      zoom: 1,
+    });
+  }
+
+  setLoaded(true);
+}, [projectId, canvasSize.width, canvasSize.height]);
 
   useEffect(() => {
-  if (!loaded) return;
+    if (!loaded) return;
 
-  const onBeforeUnload = () => {
+    const onBeforeUnload = () => {
+      persistProjectData(
+        {
+          shapes,
+          cadAssets,
+          calibrationPoints,
+          metersPerPixel,
+          projectName,
+          camera,
+        },
+        false
+      );
+    };
+
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [loaded, projectId, shapes, cadAssets, calibrationPoints, metersPerPixel, projectName, libraryCountry, camera]);
+
+  useEffect(() => {
+    if (!loaded) return;
+
     persistProjectData(
       {
         shapes,
@@ -346,26 +364,7 @@ const nextCamera =
       },
       false
     );
-  };
-
-  window.addEventListener("beforeunload", onBeforeUnload);
-  return () => window.removeEventListener("beforeunload", onBeforeUnload);
-}, [loaded, projectId, shapes, cadAssets, calibrationPoints, metersPerPixel, projectName, libraryCountry, camera]);
-useEffect(() => {
-  if (!loaded) return;
-
-  persistProjectData(
-    {
-      shapes,
-      cadAssets,
-      calibrationPoints,
-      metersPerPixel,
-      projectName,
-      camera,
-    },
-    false
-  );
-}, [camera, loaded]);
+  }, [camera, loaded]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -435,13 +434,13 @@ useEffect(() => {
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       data: {
-  shapes: data.shapes,
-  cadAssets: data.cadAssets,
-  metersPerPixel: data.metersPerPixel,
-  calibrationPoints: data.calibrationPoints,
-  camera: data.camera,
-  libraryCountry,
-},
+        shapes: data.shapes,
+        cadAssets: data.cadAssets,
+        metersPerPixel: data.metersPerPixel,
+        calibrationPoints: data.calibrationPoints,
+        camera: data.camera,
+        libraryCountry,
+      },
     });
 
     setLastSavedAt(now);
@@ -456,18 +455,18 @@ useEffect(() => {
   }
 
   function persistCurrent() {
-  persistProjectData(
-    {
-      shapes,
-      cadAssets,
-      calibrationPoints,
-      metersPerPixel,
-      projectName,
-      camera,
-    },
-    true
-  );
-}
+    persistProjectData(
+      {
+        shapes,
+        cadAssets,
+        calibrationPoints,
+        metersPerPixel,
+        projectName,
+        camera,
+      },
+      true
+    );
+  }
 
   function pushHistory(next: HistoryState) {
     setHistory((prev) => {
@@ -486,21 +485,21 @@ useEffect(() => {
   }
 
   function commitHistory(
-  nextShapes?: Shape[],
-  nextCadAssets?: CadAsset[],
-  nextCalibrationPoints?: CalibrationPoint[],
-  nextMetersPerPixel?: number,
-  nextProjectName?: string,
-  nextCamera?: CameraState
-) {
+    nextShapes?: Shape[],
+    nextCadAssets?: CadAsset[],
+    nextCalibrationPoints?: CalibrationPoint[],
+    nextMetersPerPixel?: number,
+    nextProjectName?: string,
+    nextCamera?: CameraState
+  ) {
     const nextState: HistoryState = {
-  shapes: cloneDeep(nextShapes ?? shapes),
-  cadAssets: cloneDeep(nextCadAssets ?? cadAssets),
-  calibrationPoints: cloneDeep(nextCalibrationPoints ?? calibrationPoints),
-  metersPerPixel: nextMetersPerPixel ?? metersPerPixel,
-  projectName: nextProjectName ?? projectName,
-  camera: cloneDeep(nextCamera ?? camera),
-};
+      shapes: cloneDeep(nextShapes ?? shapes),
+      cadAssets: cloneDeep(nextCadAssets ?? cadAssets),
+      calibrationPoints: cloneDeep(nextCalibrationPoints ?? calibrationPoints),
+      metersPerPixel: nextMetersPerPixel ?? metersPerPixel,
+      projectName: nextProjectName ?? projectName,
+      camera: cloneDeep(nextCamera ?? camera),
+    };
 
     pushHistory(nextState);
     persistProjectData(nextState);
@@ -512,13 +511,13 @@ useEffect(() => {
     setCalibrationPoints(cloneDeep(state.calibrationPoints));
     setMetersPerPixel(state.metersPerPixel);
     setProjectName(state.projectName);
+    setCamera(cloneDeep(state.camera));
     setSelectedId(null);
     setInteraction(null);
     setDraftLine(null);
     setHoverAnchorState(null);
     persistProjectData(state, false);
     setStatus("История применена");
-    setCamera(cloneDeep(state.camera));
   }
 
   function undo() {
@@ -2292,16 +2291,22 @@ function renderShape(shape: Shape, selected: boolean, cadAssets: CadAsset[]) {
 
   return null;
 }
-  function renderCadPrimitive(
+
+function renderCadPrimitive(
   primitive: CadPrimitive,
   key: string,
   visible: boolean
 ) {
   if (!visible) return null;
 
-const baseStrokeWidth =
-  "strokeWidth" in primitive ? primitive.strokeWidth || 1 : 1;
-const boostedStrokeWidth = Math.max(baseStrokeWidth * 1.8, 2.2);
+  const baseStrokeWidth =
+    primitive.type === "line" ||
+    primitive.type === "polyline" ||
+    primitive.type === "circle"
+      ? primitive.strokeWidth || 1
+      : 1;
+  const boostedStrokeWidth = Math.max(baseStrokeWidth * 1.8, 2.2);
+
   if (primitive.type === "line") {
     return (
       <line
@@ -2332,6 +2337,7 @@ const boostedStrokeWidth = Math.max(baseStrokeWidth * 1.8, 2.2);
         strokeLinecap="round"
         vectorEffect="non-scaling-stroke"
         shapeRendering="geometricPrecision"
+        {...(primitive.closed ? { polygonRendering: "geometricPrecision" } : {})}
       />
     );
   }
@@ -2368,6 +2374,7 @@ const boostedStrokeWidth = Math.max(baseStrokeWidth * 1.8, 2.2);
 
   return null;
 }
+
 function renderSelectionOverlay(shape: Shape) {
   if (shape.type === "line" || shape.type === "cable") {
     const midX = (shape.x + shape.x2) / 2;
