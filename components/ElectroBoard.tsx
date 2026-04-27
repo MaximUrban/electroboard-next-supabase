@@ -259,76 +259,75 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
     [shapes, metersPerPixel]
   );
 
- useEffect(() => {
-  const saved = getProjectById(projectId);
+  useEffect(() => {
+    const saved = getProjectById(projectId);
 
-  const savedCamera = saved?.data?.camera as CameraState | undefined;
+    const savedCamera = saved?.data?.camera as CameraState | undefined;
 
-  const fallbackCamera: CameraState = {
-    x: canvasSize.width / 2,
-    y: canvasSize.height / 2,
-    zoom: 1,
-  };
-
-  const nextCamera =
-    savedCamera &&
-    typeof savedCamera.x === "number" &&
-    typeof savedCamera.y === "number" &&
-    typeof savedCamera.zoom === "number"
-      ? savedCamera
-      : fallbackCamera;
-
-  if (saved) {
-    const nextShapes = (saved.data?.shapes || []) as Shape[];
-    const nextCadAssets = (saved.data?.cadAssets || []) as CadAsset[];
-    const nextMetersPerPixel = Number(saved.data?.metersPerPixel || 0);
-    const nextCalibration = (saved.data?.calibrationPoints || []) as CalibrationPoint[];
-
-    setProjectName(saved.name || "Project");
-    setShapes(nextShapes);
-    setCadAssets(nextCadAssets);
-    setMetersPerPixel(nextMetersPerPixel);
-    setCalibrationPoints(nextCalibration);
-    setLibraryCountry((saved.data?.libraryCountry as LibraryCountry) || "FR");
-    setLastSavedAt(saved.updatedAt || null);
-
-    const initial: HistoryState = {
-      shapes: cloneDeep(nextShapes),
-      cadAssets: cloneDeep(nextCadAssets),
-      calibrationPoints: cloneDeep(nextCalibration),
-      metersPerPixel: nextMetersPerPixel,
-      projectName: saved.name || "Project",
-      camera: cloneDeep(nextCamera),
-    };
-
-    setHistory([initial]);
-    setHistoryIndex(0);
-    setCamera(nextCamera);
-  } else {
-    const initial: HistoryState = {
-      shapes: [],
-      cadAssets: [],
-      calibrationPoints: [],
-      metersPerPixel: 0,
-      projectName: "Project",
-      camera: {
-        x: canvasSize.width / 2,
-        y: canvasSize.height / 2,
-        zoom: 1,
-      },
-    };
-
-    setHistory([initial]);
-    setHistoryIndex(0);
-    setCamera({
+    const fallbackCamera: CameraState = {
       x: canvasSize.width / 2,
       y: canvasSize.height / 2,
       zoom: 1,
-    });
-  }
+    };
 
-  setLoaded(true);
-}, [projectId, canvasSize.width, canvasSize.height]);
+    const nextCamera =
+      savedCamera &&
+      typeof savedCamera.x === "number" &&
+      typeof savedCamera.y === "number" &&
+      typeof savedCamera.zoom === "number"
+        ? savedCamera
+        : fallbackCamera;
+
+    if (saved) {
+      const nextShapes = (saved.data?.shapes || []) as Shape[];
+      const nextCadAssets = (saved.data?.cadAssets || []) as CadAsset[];
+      const nextMetersPerPixel = Number(saved.data?.metersPerPixel || 0);
+      const nextCalibration = (saved.data?.calibrationPoints || []) as CalibrationPoint[];
+
+      setProjectName(saved.name || "Project");
+      setShapes(nextShapes);
+      setCadAssets(nextCadAssets);
+      setMetersPerPixel(nextMetersPerPixel);
+      setCalibrationPoints(nextCalibration);
+      setLibraryCountry((saved.data?.libraryCountry as LibraryCountry) || "FR");
+      setLastSavedAt(saved.updatedAt || null);
+
+      const initial: HistoryState = {
+        shapes: cloneDeep(nextShapes),
+        cadAssets: cloneDeep(nextCadAssets),
+        calibrationPoints: cloneDeep(nextCalibration),
+        metersPerPixel: nextMetersPerPixel,
+        projectName: saved.name || "Project",
+        camera: cloneDeep(nextCamera),
+      };
+
+      setHistory([initial]);
+      setHistoryIndex(0);
+      setCamera(nextCamera);
+    } else {
+      const initial: HistoryState = {
+        shapes: [],
+        cadAssets: [],
+        calibrationPoints: [],
+        metersPerPixel: 0,
+        projectName: "Project",
+        camera: {
+          x: canvasSize.width / 2,
+          y: canvasSize.height / 2,
+          zoom: 1,
+        },
+      };
+      setHistory([initial]);
+      setHistoryIndex(0);
+      setCamera({
+        x: canvasSize.width / 2,
+        y: canvasSize.height / 2,
+        zoom: 1,
+      });
+    }
+
+    setLoaded(true);
+  }, [projectId, canvasSize.width, canvasSize.height]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -1505,7 +1504,7 @@ setCanvasCursor("grab");
 
                 {shapes.map((shape) => (
   <React.Fragment key={shape.id}>
-    {renderShape(shape, selectedId === shape.id, cadAssets)}
+    {renderShape(shape, selectedId === shape.id, cadAssets, cadStrokeScale)}
   </React.Fragment>
 ))}
 
@@ -1603,27 +1602,28 @@ setCanvasCursor("grab");
               Выберите <b>Масштаб</b> и нажмите две точки.
             </div>
           </div>
+
           <div style={styles.card}>
-  <div style={styles.cardTitle}>CAD отображение</div>
+            <div style={styles.cardTitle}>CAD отображение</div>
 
-  <div style={styles.compactField}>
-    <label style={styles.label}>
-      Толщина CAD: {cadStrokeScale.toFixed(1)}x
-    </label>
-    <input
-      type="range"
-      min={1}
-      max={4}
-      step={0.1}
-      value={cadStrokeScale}
-      onChange={(e) => setCadStrokeScale(Number(e.target.value))}
-    />
-  </div>
+            <div style={styles.compactField}>
+              <label style={styles.label}>
+                Толщина CAD: {cadStrokeScale.toFixed(1)}x
+              </label>
+              <input
+                type="range"
+                min={1}
+                max={4}
+                step={0.1}
+                value={cadStrokeScale}
+                onChange={(e) => setCadStrokeScale(Number(e.target.value))}
+              />
+            </div>
 
-  <div style={styles.hintCompact}>
-    Меняет читаемость импортированного чертежа на экране.
-  </div>
-</div>
+            <div style={styles.hintCompact}>
+              Меняет читаемость импортированного чертежа на экране.
+            </div>
+          </div>
 
           <div style={styles.card}>
             <div style={styles.cardTitle}>Объект</div>
@@ -2301,13 +2301,13 @@ function renderShape(
 
         <g transform={`translate(${shape.x} ${shape.y}) scale(${scaleX} ${scaleY})`}>
           {asset.primitives.map((primitive, index) =>
-  renderCadPrimitive(
-    primitive,
-    `${shape.id}-${index}`,
-    shape.layerState[primitive.layerId] ?? true,
-    cadStrokeScale
-  )
-)}
+            renderCadPrimitive(
+              primitive,
+              `${shape.id}-${index}`,
+              shape.layerState[primitive.layerId] ?? true,
+              cadStrokeScale
+            )
+          )}
         </g>
 
         <text x={shape.x} y={shape.y - 10} fill="#f2f6ff" fontSize="14">
@@ -2334,6 +2334,7 @@ function renderCadPrimitive(
     primitive.type === "circle"
       ? primitive.strokeWidth || 1
       : 1;
+
   const boostedStrokeWidth = Math.max(baseStrokeWidth * cadStrokeScale, 2.2);
 
   if (primitive.type === "line") {
@@ -2366,7 +2367,6 @@ function renderCadPrimitive(
         strokeLinecap="round"
         vectorEffect="non-scaling-stroke"
         shapeRendering="geometricPrecision"
-        {...(primitive.closed ? { polygonRendering: "geometricPrecision" } : {})}
       />
     );
   }
