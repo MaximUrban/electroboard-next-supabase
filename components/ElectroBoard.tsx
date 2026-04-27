@@ -2252,8 +2252,9 @@ function renderShape(shape: Shape, selected: boolean, cadAssets: CadAsset[]) {
 ) {
   if (!visible) return null;
 
-  const boostedStrokeWidth = Math.max((primitive.strokeWidth || 1) * 1.8, 2.2);
-
+const baseStrokeWidth =
+  "strokeWidth" in primitive ? primitive.strokeWidth || 1 : 1;
+const boostedStrokeWidth = Math.max(baseStrokeWidth * 1.8, 2.2);
   if (primitive.type === "line") {
     return (
       <line
