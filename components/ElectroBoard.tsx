@@ -1182,16 +1182,15 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       const scaleY = shape.height / Math.max(asset.bounds.height, 1);
 
       const mapX = (x: number) => shape.x + x * scaleX;
-      const mapY = (y: number) => shape.y + y * scaleY;
+const mapY = (y: number) => shape.y + y * scaleY;
 
-      const stroke =
-  primitive.type === "text"
-    ? "#e7efff"
-    : (primitive.stroke || "#e7efff");
+const stroke =
+  primitive.type !== "text" && "stroke" in primitive
+    ? primitive.stroke || "#e7efff"
+    : "#e7efff";
 
 const strokeWidth =
   enhanceCadStroke(primitive, zoom) * Math.max(scaleX, scaleY) * 0.35;
-
       if (primitive.type === "line") {
         return (
           <line
