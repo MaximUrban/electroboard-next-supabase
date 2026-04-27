@@ -152,6 +152,10 @@ function schneiderRenditionUrl(docRef: string) {
   )}&p_File_Type=rendition_369_jpg&default_image=DefaultProductImage.png`;
 }
 
+function turkeyArticleImageUrl(article: string) {
+  return schneiderRenditionUrl(`${article}_IoP-Default`);
+}
+
 function buildItem(params: {
   id: string;
   series: string;
@@ -172,14 +176,14 @@ function buildItem(params: {
     category: params.category,
     article: params.article,
     modules: params.modules,
-    catalogImageUrl: params.imageDocRef
-      ? schneiderRenditionUrl(params.imageDocRef)
-      : makeCatalogPreview({
-          brand: "Schneider",
-          series: params.series,
-          article: params.article,
-          line2: params.category.toUpperCase(),
-        }),
+    catalogImageUrl: params.countries.includes("TR")
+  ? schneiderRenditionUrl(params.imageDocRef || `${params.article}_IoP-Default`)
+  : makeCatalogPreview({
+      brand: "Schneider",
+      series: params.series,
+      article: params.article,
+      line2: params.category.toUpperCase(),
+    }),
     imageDocRef: params.imageDocRef,
     productUrl: params.productUrl,
     titleByCountry: params.titleByCountry,
@@ -325,7 +329,7 @@ const staticDevices: DeviceLibrarySourceItem[] = [
   buildTurkeyMcb("EZ9F34206", "Easy9", 2, 6, "C", "4.5kA"),
   buildTurkeyMcb("EZ9F34210", "Easy9", 2, 10, "C", "4.5kA"),
   buildTurkeyMcb("EZ9F34216", "Easy9", 2, 16, "C", "4.5kA"),
-  buildTurkeyMcb("EZ9F34220", "Easy9", 2, 20, "C", "4.5kA", "PB111305"),
+  buildTurkeyMcb("EZ9F34220", "Easy9", 2, 20, "C", "4.5kA"),
   buildTurkeyMcb("EZ9F34225", "Easy9", 2, 25, "C", "4.5kA"),
   buildTurkeyMcb("EZ9F34232", "Easy9", 2, 32, "C", "4.5kA"),
   buildTurkeyMcb("EZ9F34240", "Easy9", 2, 40, "C", "4.5kA", "PB111306"),
