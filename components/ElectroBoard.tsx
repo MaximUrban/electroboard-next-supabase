@@ -156,6 +156,18 @@ const defaultStyle = {
   cableType: "",
 };
 
+function toSavedProjectData(payload: ProjectPayload) {
+  const now = Date.now();
+
+  return {
+    id: payload.id,
+    name: payload.name,
+    data: payload,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 const GRID_SIZE = 24;
 const SNAP_DISTANCE = 8;
 const MIN_SIZE = 24;
@@ -344,7 +356,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
         return merged;
       });
 
-      saveProject(payload);
+      saveProject(toSavedProjectData(payload));
     },
     [projectId, projectName, zoom, panX, panY, historyIndex]
   );
@@ -392,13 +404,15 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
   useEffect(() => {
     if (!loaded) return;
-    saveProject({
-      id: projectId,
-      name: projectName,
-      shapes,
-      cadAssets,
-      view: { zoom, panX, panY },
-    });
+    saveProject(
+  toSavedProjectData({
+    id: projectId,
+    name: projectName,
+    shapes,
+    cadAssets,
+    view: { zoom, panX, panY },
+  })
+);
   }, [loaded, projectId, projectName, shapes, cadAssets, zoom, panX, panY]);
 
   const pushShapes = useCallback(
