@@ -140,6 +140,13 @@ type AnchorPoint = {
 
 type HandleType =
   | "move"
+  | "resize-n"
+  | "resize-s"
+  | "resize-e"
+  | "resize-w"
+  | "resize-nw"
+  | "resize-ne"
+  | "resize-sw"
   | "resize-se"
   | "resize-circle"
   | "rotate"
@@ -555,68 +562,67 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       return next;
     });
   }
+
   function renameCadLayer(shapeId: string, layerId: string, nextName: string) {
-  const trimmed = nextName.trim();
-  if (!trimmed) return;
+    const trimmed = nextName.trim();
+    if (!trimmed) return;
 
-  const shape = shapes.find((item) => item.id === shapeId);
-  if (!shape || shape.type !== "cad") return;
+    const shape = shapes.find((item) => item.id === shapeId);
+    if (!shape || shape.type !== "cad") return;
 
-  setCadAssets((prevAssets) => {
-    const nextAssets = prevAssets.map((asset) => {
-      if (asset.id !== shape.assetId) return asset;
-
-      return {
-        ...asset,
-        layers: asset.layers.map((layer) =>
-          layer.id === layerId
-            ? { ...layer, name: trimmed }
-            : layer
-        ),
-      };
-    });
-
-    window.setTimeout(() => commitHistory(shapes, nextAssets), 0);
-    return nextAssets;
-  });
-}
-
-function deleteCadLayer(shapeId: string, layerId: string) {
-  const shape = shapes.find((item) => item.id === shapeId);
-  if (!shape || shape.type !== "cad") return;
-
-  setCadAssets((prevAssets) => {
-    const nextAssets = prevAssets.map((asset) => {
-      if (asset.id !== shape.assetId) return asset;
-
-      return {
-        ...asset,
-        layers: asset.layers.filter((layer) => layer.id !== layerId),
-        primitives: asset.primitives.filter((primitive) => primitive.layerId !== layerId),
-      };
-    });
-
-    setShapes((prevShapes) => {
-      const nextShapes = prevShapes.map((item) => {
-        if (item.id !== shapeId) return item;
-        if (item.type !== "cad") return item;
-
-        const nextLayerState = { ...item.layerState };
-        delete nextLayerState[layerId];
+    setCadAssets((prevAssets) => {
+      const nextAssets = prevAssets.map((asset) => {
+        if (asset.id !== shape.assetId) return asset;
 
         return {
-          ...item,
-          layerState: nextLayerState,
+          ...asset,
+          layers: asset.layers.map((layer) =>
+            layer.id === layerId ? { ...layer, name: trimmed } : layer
+          ),
         };
       });
 
-      window.setTimeout(() => commitHistory(nextShapes, nextAssets), 0);
-      return nextShapes;
+      window.setTimeout(() => commitHistory(shapes, nextAssets), 0);
+      return nextAssets;
     });
+  }
 
-    return nextAssets;
-  });
-}
+  function deleteCadLayer(shapeId: string, layerId: string) {
+    const shape = shapes.find((item) => item.id === shapeId);
+    if (!shape || shape.type !== "cad") return;
+
+    setCadAssets((prevAssets) => {
+      const nextAssets = prevAssets.map((asset) => {
+        if (asset.id !== shape.assetId) return asset;
+
+        return {
+          ...asset,
+          layers: asset.layers.filter((layer) => layer.id !== layerId),
+          primitives: asset.primitives.filter((primitive) => primitive.layerId !== layerId),
+        };
+      });
+
+      setShapes((prevShapes) => {
+        const nextShapes = prevShapes.map((item) => {
+          if (item.id !== shapeId) return item;
+          if (item.type !== "cad") return item;
+
+          const nextLayerState = { ...item.layerState };
+          delete nextLayerState[layerId];
+
+          return {
+            ...item,
+            layerState: nextLayerState,
+          };
+        });
+
+        window.setTimeout(() => commitHistory(nextShapes, nextAssets), 0);
+        return nextShapes;
+      });
+
+      return nextAssets;
+    });
+  }
 
   function nudgeSelected(dx: number, dy: number) {
     if (!selectedId) return;
@@ -775,108 +781,108 @@ function deleteCadLayer(shapeId: string, layerId: string) {
     setSelectedId(shape.id);
     setShowLibrary(false);
   }
-function placeImportedCadAsset(cadAsset: CadAsset, displayName: string) {
-  const fitWidth = 900;
-  const scale = fitWidth / Math.max(1, cadAsset.bounds.width);
-  const width = cadAsset.bounds.width * scale;
-  const height = cadAsset.bounds.height * scale;
 
-  const centerWorld = screenToWorld(canvasSize.width / 2, canvasSize.height / 2);
+  function placeImportedCadAsset(cadAsset: CadAsset, displayName: string) {
+    const fitWidth = 900;
+    const scale = fitWidth / Math.max(1, cadAsset.bounds.width);
+    const width = cadAsset.bounds.width * scale;
+    const height = cadAsset.bounds.height * scale;
 
-  const layerState = Object.fromEntries(
-    cadAsset.layers.map((layer) => [layer.id, layer.visible])
-  );
+    const centerWorld = screenToWorld(canvasSize.width / 2, canvasSize.height / 2);
 
-  const shape: CadShape = {
-    id: crypto.randomUUID(),
-    type: "cad",
-    x: centerWorld.x - width / 2,
-    y: centerWorld.y - height / 2,
-    width,
-    height,
-    assetId: cadAsset.id,
-    article: displayName,
-    brand: "Imported",
-    series: "Drawing",
-    modules: 0,
-    categoryLabel: "Imported drawing",
-    country: "TR",
-    layerState,
-    label: displayName,
-    groupName: "",
-    cableType: "",
-    ...defaultStyle,
-    fillColor: "#1b2347",
-    opacity: 1,
-  };
+    const layerState = Object.fromEntries(
+      cadAsset.layers.map((layer) => [layer.id, layer.visible])
+    );
 
-  setCadAssets((prevAssets) => {
-    const nextAssets = [...prevAssets, cadAsset];
+    const shape: CadShape = {
+      id: crypto.randomUUID(),
+      type: "cad",
+      x: centerWorld.x - width / 2,
+      y: centerWorld.y - height / 2,
+      width,
+      height,
+      assetId: cadAsset.id,
+      article: displayName,
+      brand: "Imported",
+      series: "Drawing",
+      modules: 0,
+      categoryLabel: "Imported drawing",
+      country: "TR",
+      layerState,
+      label: displayName,
+      groupName: "",
+      cableType: "",
+      ...defaultStyle,
+      fillColor: "#1b2347",
+      opacity: 1,
+    };
 
-    setShapes((prevShapes) => {
-      const nextShapes = [...prevShapes, shape];
-      window.setTimeout(() => commitHistory(nextShapes, nextAssets), 0);
-      return nextShapes;
+    setCadAssets((prevAssets) => {
+      const nextAssets = [...prevAssets, cadAsset];
+
+      setShapes((prevShapes) => {
+        const nextShapes = [...prevShapes, shape];
+        window.setTimeout(() => commitHistory(nextShapes, nextAssets), 0);
+        return nextShapes;
+      });
+
+      return nextAssets;
     });
 
-    return nextAssets;
-  });
+    setSelectedId(shape.id);
+  }
 
-  setSelectedId(shape.id);
-}
   async function importDrawingFile(file: File) {
-  try {
-    const lower = file.name.toLowerCase();
-    const isDxf = lower.endsWith(".dxf");
-    const isDwg = lower.endsWith(".dwg");
+    try {
+      const lower = file.name.toLowerCase();
+      const isDxf = lower.endsWith(".dxf");
+      const isDwg = lower.endsWith(".dwg");
 
-    setStatus(`Импорт: ${file.name}...`);
+      setStatus(`Импорт: ${file.name}...`);
 
-    if (isDwg) {
-      const result = await importDwgOnServer(file);
+      if (isDwg) {
+        const result = await importDwgOnServer(file);
 
-      if (result.ok) {
-        placeImportedCadAsset(result.asset, file.name);
-        setStatus(`DWG импортирован: ${file.name}`);
-        return;
-      }
+        if (result.ok) {
+          placeImportedCadAsset(result.asset, file.name);
+          setStatus(`DWG импортирован: ${file.name}`);
+          return;
+        }
 
-      const shouldFallbackToMock =
-        result.status === 501 ||
-        result.error.toLowerCase().includes("конвертер") ||
-        result.error.toLowerCase().includes("not connected") ||
-        result.error.toLowerCase().includes("not configured");
+        const shouldFallbackToMock =
+          result.status === 501 ||
+          result.error.toLowerCase().includes("конвертер") ||
+          result.error.toLowerCase().includes("not connected") ||
+          result.error.toLowerCase().includes("not configured");
 
-      if (!shouldFallbackToMock) {
-        setStatus(`DWG не импортирован: ${result.error}`);
-        alert(
-          result.details
-            ? `${result.error}\n\n${result.details}`
-            : result.error
-        );
+        if (!shouldFallbackToMock) {
+          setStatus(`DWG не импортирован: ${result.error}`);
+          alert(
+            result.details ? `${result.error}\n\n${result.details}` : result.error
+          );
+          return;
+        }
+
+        const cadAsset = await createMockCadAssetFromImportedFile(file);
+        placeImportedCadAsset(cadAsset, file.name);
+        setStatus(`DWG импортирован во временном mock-режиме: ${file.name}`);
         return;
       }
 
       const cadAsset = await createMockCadAssetFromImportedFile(file);
       placeImportedCadAsset(cadAsset, file.name);
-      setStatus(`DWG импортирован во временном mock-режиме: ${file.name}`);
-      return;
-    }
 
-    const cadAsset = await createMockCadAssetFromImportedFile(file);
-    placeImportedCadAsset(cadAsset, file.name);
-
-    if (isDxf) {
-      setStatus(`DXF импортирован: ${file.name}`);
-    } else {
-      setStatus(`Импортирован mock-чертёж: ${file.name}`);
+      if (isDxf) {
+        setStatus(`DXF импортирован: ${file.name}`);
+      } else {
+        setStatus(`Импортирован mock-чертёж: ${file.name}`);
+      }
+    } catch (error) {
+      console.error(error);
+      setStatus(`Ошибка импорта: ${file.name}`);
+      alert("Ошибка импорта файла");
     }
-  } catch (error) {
-    console.error(error);
-    setStatus(`Ошибка импорта: ${file.name}`);
-    alert("Ошибка импорта файла");
   }
-}
 
   function handleCanvasMouseDown(e: React.MouseEvent<SVGSVGElement>) {
     const screenPoint = getScreenPoint(e.clientX, e.clientY);
@@ -1279,13 +1285,7 @@ function placeImportedCadAsset(cadAsset: CadAsset, displayName: string) {
 
           <input
             value={projectName}
-            onChange={async (e) => {
-  const file = e.target.files?.[0];
-  if (file) {
-    await importDrawingFile(file);
-  }
-  e.currentTarget.value = "";
-}}
+            onChange={(e) => setProjectName(e.target.value)}
             style={styles.projectInput}
           />
         </div>
@@ -1320,25 +1320,25 @@ function placeImportedCadAsset(cadAsset: CadAsset, displayName: string) {
             Библиотека
           </button>
           <button
-  style={styles.btn}
-  onClick={() => importInputRef.current?.click()}
->
-  Импорт чертежа
-</button>
+            style={styles.btn}
+            onClick={() => importInputRef.current?.click()}
+          >
+            Импорт чертежа
+          </button>
 
-<input
-  ref={importInputRef}
-  type="file"
-  accept=".dwg,.dxf,.pdf,.png,.jpg,.jpeg"
-  style={{ display: "none" }}
-  onChange={(e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      importDrawingFile(file);
-    }
-    e.currentTarget.value = "";
-  }}
-/>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".dwg,.dxf,.pdf,.png,.jpg,.jpeg"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) {
+                importDrawingFile(file);
+              }
+              e.currentTarget.value = "";
+            }}
+          />
 
           <button style={styles.iconBtn} onClick={undo} title="Undo">
             <IconUndo />
@@ -1547,19 +1547,19 @@ function placeImportedCadAsset(cadAsset: CadAsset, displayName: string) {
                     </div>
 
                     <div style={styles.compactField}>
-  <label style={styles.label}>Источник CAD</label>
-  <input
-    value={
-      selectedCadAsset
-        ? selectedCadAsset.importMode === "drawing-import"
-          ? `${selectedCadAsset.sourceName || "Imported drawing"} (${selectedCadAsset.sourceFormat.toUpperCase()})`
-          : `${selectedCadAsset.sourceLabel || ""} (${selectedCadAsset.sourceFormat.toUpperCase()})`
-        : ""
-    }
-    readOnly
-    style={styles.inputCompact}
-  />
-</div>
+                      <label style={styles.label}>Источник CAD</label>
+                      <input
+                        value={
+                          selectedCadAsset
+                            ? selectedCadAsset.importMode === "drawing-import"
+                              ? `${selectedCadAsset.sourceName || "Imported drawing"} (${selectedCadAsset.sourceFormat.toUpperCase()})`
+                              : `${selectedCadAsset.sourceLabel || ""} (${selectedCadAsset.sourceFormat.toUpperCase()})`
+                            : ""
+                        }
+                        readOnly
+                        style={styles.inputCompact}
+                      />
+                    </div>
                   </>
                 ) : null}
 
@@ -1696,37 +1696,37 @@ function placeImportedCadAsset(cadAsset: CadAsset, displayName: string) {
 
               <div style={{ display: "grid", gap: 8 }}>
                 {selectedCadAsset.layers.map((layer) => {
-  const visible = selectedShape.layerState[layer.id] ?? layer.visible;
+                  const visible = selectedShape.layerState[layer.id] ?? layer.visible;
 
-  return (
-    <div key={layer.id} style={styles.layerRowEditable}>
-      <input
-        type="checkbox"
-        checked={visible}
-        onChange={(e) =>
-          setCadLayerVisibility(selectedShape.id, layer.id, e.target.checked)
-        }
-      />
+                  return (
+                    <div key={layer.id} style={styles.layerRowEditable}>
+                      <input
+                        type="checkbox"
+                        checked={visible}
+                        onChange={(e) =>
+                          setCadLayerVisibility(selectedShape.id, layer.id, e.target.checked)
+                        }
+                      />
 
-      <input
-        value={layer.name}
-        onChange={(e) =>
-          renameCadLayer(selectedShape.id, layer.id, e.target.value)
-        }
-        style={styles.layerNameInput}
-      />
+                      <input
+                        value={layer.name}
+                        onChange={(e) =>
+                          renameCadLayer(selectedShape.id, layer.id, e.target.value)
+                        }
+                        style={styles.layerNameInput}
+                      />
 
-      <button
-        type="button"
-        style={styles.layerDeleteBtn}
-        onClick={() => deleteCadLayer(selectedShape.id, layer.id)}
-        title="Удалить слой"
-      >
-        ×
-      </button>
-    </div>
-  );
-})}
+                      <button
+                        type="button"
+                        style={styles.layerDeleteBtn}
+                        onClick={() => deleteCadLayer(selectedShape.id, layer.id)}
+                        title="Удалить слой"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ) : null}
@@ -2000,6 +2000,7 @@ function renderShape(shape: Shape, selected: boolean, cadAssets: CadAsset[]) {
           strokeWidth={sw}
           strokeDasharray={dash}
           rx="6"
+          style={{ cursor: "move" }}
         />
         <text x={shape.x + 6} y={shape.y - 10} fill="#f2f6ff" fontSize="14">
           {shape.label}
@@ -2019,6 +2020,7 @@ function renderShape(shape: Shape, selected: boolean, cadAssets: CadAsset[]) {
           stroke={stroke}
           strokeWidth={sw}
           strokeDasharray={dash}
+          style={{ cursor: "move" }}
         />
         <text x={shape.x + shape.radius + 6} y={shape.y - shape.radius - 10} fill="#f2f6ff" fontSize="14">
           {shape.label}
@@ -2040,6 +2042,7 @@ function renderShape(shape: Shape, selected: boolean, cadAssets: CadAsset[]) {
           strokeDasharray={dash}
           opacity={shape.opacity}
           strokeLinecap="round"
+          style={{ cursor: "move" }}
         />
         <text x={(shape.x + shape.x2) / 2 + 6} y={(shape.y + shape.y2) / 2 - 6} fill="#f2f6ff" fontSize="14">
           {shape.label} {shape.groupName ? `(${shape.groupName})` : ""}
@@ -2061,6 +2064,7 @@ function renderShape(shape: Shape, selected: boolean, cadAssets: CadAsset[]) {
           stroke={stroke}
           strokeWidth={sw}
           strokeDasharray={dash}
+          style={{ cursor: "move" }}
         />
         <circle cx={shape.x - 8} cy={shape.y} r="4" fill={stroke} />
         <circle cx={shape.x + 8} cy={shape.y} r="4" fill={stroke} />
@@ -2084,6 +2088,7 @@ function renderShape(shape: Shape, selected: boolean, cadAssets: CadAsset[]) {
           stroke={stroke}
           strokeWidth={sw}
           strokeDasharray={dash}
+          style={{ cursor: "move" }}
         />
         <line
           x1={shape.x - 10}
@@ -2102,11 +2107,35 @@ function renderShape(shape: Shape, selected: boolean, cadAssets: CadAsset[]) {
   }
 
   if (shape.type === "cad") {
-  const asset = cadAssets.find((item) => item.id === shape.assetId);
-  const cx = shape.x + shape.width / 2;
-  const cy = shape.y + shape.height / 2;
+    const asset = cadAssets.find((item) => item.id === shape.assetId);
+    const cx = shape.x + shape.width / 2;
+    const cy = shape.y + shape.height / 2;
 
-  if (!asset) {
+    if (!asset) {
+      return (
+        <g transform={`rotate(${shape.rotation} ${cx} ${cy})`}>
+          <rect
+            x={shape.x}
+            y={shape.y}
+            width={shape.width}
+            height={shape.height}
+            rx="10"
+            fill="rgba(255,255,255,0.03)"
+            stroke={stroke}
+            strokeWidth={sw}
+            style={{ cursor: "move" }}
+          />
+          <text x={shape.x + 8} y={shape.y + 20} fill="#f2f6ff" fontSize="12">
+            CAD asset not found
+          </text>
+        </g>
+      );
+    }
+
+    const scaleX = shape.width / Math.max(1, asset.bounds.width);
+    const scaleY = shape.height / Math.max(1, asset.bounds.height);
+    const previewVisible = shape.layerState["preview"] ?? true;
+
     return (
       <g transform={`rotate(${shape.rotation} ${cx} ${cy})`}>
         <rect
@@ -2115,63 +2144,40 @@ function renderShape(shape: Shape, selected: boolean, cadAssets: CadAsset[]) {
           width={shape.width}
           height={shape.height}
           rx="10"
-          fill="rgba(255,255,255,0.03)"
-          stroke={stroke}
-          strokeWidth={sw}
+          fill="rgba(255,255,255,0.02)"
+          stroke={selected ? "#9ec1ff" : "rgba(255,255,255,0.18)"}
+          strokeWidth={selected ? 2 : 1}
+          style={{ cursor: "move" }}
         />
-        <text x={shape.x + 8} y={shape.y + 20} fill="#f2f6ff" fontSize="12">
-          CAD asset not found
+
+        {asset.previewUrl && previewVisible ? (
+          <image
+            href={asset.previewUrl}
+            x={shape.x + 6}
+            y={shape.y + 6}
+            width={shape.width - 12}
+            height={shape.height - 12}
+            preserveAspectRatio="xMidYMid meet"
+            opacity={0.28}
+          />
+        ) : null}
+
+        <g transform={`translate(${shape.x} ${shape.y}) scale(${scaleX} ${scaleY})`}>
+          {asset.primitives.map((primitive, index) =>
+            renderCadPrimitive(
+              primitive,
+              `${shape.id}-${index}`,
+              shape.layerState[primitive.layerId] ?? true
+            )
+          )}
+        </g>
+
+        <text x={shape.x} y={shape.y - 10} fill="#f2f6ff" fontSize="14">
+          {shape.label}
         </text>
       </g>
     );
   }
-
-  const scaleX = shape.width / Math.max(1, asset.bounds.width);
-  const scaleY = shape.height / Math.max(1, asset.bounds.height);
-  const previewVisible = shape.layerState["preview"] ?? true;
-
-  return (
-    <g transform={`rotate(${shape.rotation} ${cx} ${cy})`}>
-      <rect
-        x={shape.x}
-        y={shape.y}
-        width={shape.width}
-        height={shape.height}
-        rx="10"
-        fill="rgba(255,255,255,0.01)"
-        stroke={selected ? "#9ec1ff" : "rgba(255,255,255,0.14)"}
-        strokeWidth={selected ? 2 : 1}
-      />
-
-      {asset.previewUrl && previewVisible ? (
-        <image
-          href={asset.previewUrl}
-          x={shape.x + 6}
-          y={shape.y + 6}
-          width={shape.width - 12}
-          height={shape.height - 12}
-          preserveAspectRatio="xMidYMid meet"
-          opacity={0.08}
-          pointerEvents="none"
-        />
-      ) : null}
-
-      <g transform={`translate(${shape.x} ${shape.y}) scale(${scaleX} ${scaleY})`}>
-        {asset.primitives.map((primitive, index) =>
-          renderCadPrimitive(
-            primitive,
-            `${shape.id}-${index}`,
-            shape.layerState[primitive.layerId] ?? true
-          )
-        )}
-      </g>
-
-      <text x={shape.x} y={shape.y - 10} fill="#f2f6ff" fontSize="14">
-        {shape.label}
-      </text>
-    </g>
-  );
-}
 
   return null;
 }
@@ -2191,11 +2197,8 @@ function renderCadPrimitive(
         y1={primitive.y1}
         x2={primitive.x2}
         y2={primitive.y2}
-        stroke={primitive.stroke || "#eaf1ff"}
-        strokeWidth={Math.max(primitive.strokeWidth || 1, 1.6)}
-        opacity={0.98}
-        vectorEffect="non-scaling-stroke"
-        shapeRendering="geometricPrecision"
+        stroke={primitive.stroke || "#dce7ff"}
+        strokeWidth={primitive.strokeWidth || 1}
       />
     );
   }
@@ -2207,11 +2210,9 @@ function renderCadPrimitive(
         key={key}
         points={points}
         fill={primitive.closed ? primitive.fill || "none" : "none"}
-        stroke={primitive.stroke || "#eaf1ff"}
-        strokeWidth={Math.max(primitive.strokeWidth || 1, 1.6)}
-        opacity={0.98}
-        vectorEffect="non-scaling-stroke"
-        shapeRendering="geometricPrecision"
+        stroke={primitive.stroke || "#dce7ff"}
+        strokeWidth={primitive.strokeWidth || 1}
+        {...(primitive.closed ? { polygonRendering: "geometricPrecision" } : {})}
       />
     );
   }
@@ -2224,11 +2225,8 @@ function renderCadPrimitive(
         cy={primitive.cy}
         r={primitive.r}
         fill={primitive.fill || "none"}
-        stroke={primitive.stroke || "#eaf1ff"}
-        strokeWidth={Math.max(primitive.strokeWidth || 1, 1.6)}
-        opacity={0.98}
-        vectorEffect="non-scaling-stroke"
-        shapeRendering="geometricPrecision"
+        stroke={primitive.stroke || "#dce7ff"}
+        strokeWidth={primitive.strokeWidth || 1}
       />
     );
   }
@@ -2239,9 +2237,8 @@ function renderCadPrimitive(
         key={key}
         x={primitive.x}
         y={primitive.y}
-        fill={primitive.fill || "#f4f7ff"}
-        fontSize={Math.max(primitive.size || 12, 14)}
-        opacity={0.98}
+        fill={primitive.fill || "#f2f6ff"}
+        fontSize={primitive.size || 12}
       >
         {primitive.text}
       </text>
@@ -2257,9 +2254,9 @@ function renderSelectionOverlay(shape: Shape) {
     const midY = (shape.y + shape.y2) / 2;
     return (
       <g>
-        <circle cx={shape.x} cy={shape.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" />
-        <circle cx={shape.x2} cy={shape.y2} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" />
-        <circle cx={midX} cy={midY} r="7" fill="#3d63ff" stroke="#fff" strokeWidth="2" />
+        <circle cx={shape.x} cy={shape.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" style={{ cursor: "move" }} />
+        <circle cx={shape.x2} cy={shape.y2} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" style={{ cursor: "move" }} />
+        <circle cx={midX} cy={midY} r="7" fill="#3d63ff" stroke="#fff" strokeWidth="2" style={{ cursor: "move" }} />
       </g>
     );
   }
@@ -2272,7 +2269,15 @@ function renderSelectionOverlay(shape: Shape) {
         {anchors.map((a) => (
           <circle key={a.id} cx={a.x} cy={a.y} r="4" fill="#9ec1ff" stroke="#fff" strokeWidth="1.5" />
         ))}
-        <circle cx={shape.x + shape.radius} cy={shape.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" />
+        <circle
+          cx={shape.x + shape.radius}
+          cy={shape.y}
+          r="8"
+          fill="#fff"
+          stroke="#3d63ff"
+          strokeWidth="3"
+          style={{ cursor: "ew-resize" }}
+        />
       </g>
     );
   }
@@ -2284,11 +2289,13 @@ function renderSelectionOverlay(shape: Shape) {
     shape.type === "cad"
   ) {
     const geometry = getSelectionGeometry(shape);
+
     return (
       <g>
         {anchors.map((a) => (
           <circle key={a.id} cx={a.x} cy={a.y} r="4" fill="#9ec1ff" stroke="#fff" strokeWidth="1.5" />
         ))}
+
         <line
           x1={geometry.center.x}
           y1={geometry.center.y}
@@ -2298,8 +2305,26 @@ function renderSelectionOverlay(shape: Shape) {
           strokeWidth="2"
           opacity="0.7"
         />
-        <circle cx={geometry.resizeHandle.x} cy={geometry.resizeHandle.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" />
-        <circle cx={geometry.rotateHandle.x} cy={geometry.rotateHandle.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" />
+
+        <circle cx={geometry.corners.nw.x} cy={geometry.corners.nw.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" style={{ cursor: "nwse-resize" }} />
+        <circle cx={geometry.corners.ne.x} cy={geometry.corners.ne.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" style={{ cursor: "nesw-resize" }} />
+        <circle cx={geometry.corners.se.x} cy={geometry.corners.se.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" style={{ cursor: "nwse-resize" }} />
+        <circle cx={geometry.corners.sw.x} cy={geometry.corners.sw.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" style={{ cursor: "nesw-resize" }} />
+
+        <circle cx={geometry.sides.n.x} cy={geometry.sides.n.y} r="7" fill="#dfe8ff" stroke="#3d63ff" strokeWidth="2.5" style={{ cursor: "ns-resize" }} />
+        <circle cx={geometry.sides.e.x} cy={geometry.sides.e.y} r="7" fill="#dfe8ff" stroke="#3d63ff" strokeWidth="2.5" style={{ cursor: "ew-resize" }} />
+        <circle cx={geometry.sides.s.x} cy={geometry.sides.s.y} r="7" fill="#dfe8ff" stroke="#3d63ff" strokeWidth="2.5" style={{ cursor: "ns-resize" }} />
+        <circle cx={geometry.sides.w.x} cy={geometry.sides.w.y} r="7" fill="#dfe8ff" stroke="#3d63ff" strokeWidth="2.5" style={{ cursor: "ew-resize" }} />
+
+        <circle
+          cx={geometry.rotateHandle.x}
+          cy={geometry.rotateHandle.y}
+          r="8"
+          fill="#fff"
+          stroke="#3d63ff"
+          strokeWidth="3"
+          style={{ cursor: "crosshair" }}
+        />
       </g>
     );
   }
@@ -2522,33 +2547,113 @@ function transformShape(
     };
   }
 
-  if (interaction.mode === "resize-se") {
+  const isRectLike =
+    shape.type === "rectangle" ||
+    shape.type === "socket" ||
+    shape.type === "switch" ||
+    shape.type === "cad";
+
+  if ((isCornerResizeHandle(interaction.mode) || isSideResizeHandle(interaction.mode)) && isRectLike) {
+    const s = initial as RectangleShape | SocketShape | SwitchShape | CadShape;
+
+    let left: number;
+    let top: number;
+    let width: number;
+    let height: number;
+
+    if (s.type === "rectangle" || s.type === "cad") {
+      left = s.x;
+      top = s.y;
+      width = s.width;
+      height = s.height;
+    } else {
+      left = s.x - s.width / 2;
+      top = s.y - s.height / 2;
+      width = s.width;
+      height = s.height;
+    }
+
+    let nextLeft = left;
+    let nextTop = top;
+    let nextWidth = width;
+    let nextHeight = height;
+
+    if (isCornerResizeHandle(interaction.mode)) {
+      const ratio = width / height;
+
+      if (interaction.mode === "resize-se") {
+        const size = Math.max(width + dx, height + dy * ratio, 16);
+        nextWidth = size;
+        nextHeight = size / ratio;
+      }
+
+      if (interaction.mode === "resize-sw") {
+        const size = Math.max(width - dx, height + dy * ratio, 16);
+        nextWidth = size;
+        nextHeight = size / ratio;
+        nextLeft = left + (width - nextWidth);
+      }
+
+      if (interaction.mode === "resize-ne") {
+        const size = Math.max(width + dx, height - dy * ratio, 16);
+        nextWidth = size;
+        nextHeight = size / ratio;
+        nextTop = top + (height - nextHeight);
+      }
+
+      if (interaction.mode === "resize-nw") {
+        const size = Math.max(width - dx, height - dy * ratio, 16);
+        nextWidth = size;
+        nextHeight = size / ratio;
+        nextLeft = left + (width - nextWidth);
+        nextTop = top + (height - nextHeight);
+      }
+    }
+
+    if (isSideResizeHandle(interaction.mode)) {
+      if (interaction.mode === "resize-e") {
+        nextWidth = Math.max(16, width + dx);
+      }
+      if (interaction.mode === "resize-w") {
+        nextWidth = Math.max(16, width - dx);
+        nextLeft = left + (width - nextWidth);
+      }
+      if (interaction.mode === "resize-s") {
+        nextHeight = Math.max(16, height + dy);
+      }
+      if (interaction.mode === "resize-n") {
+        nextHeight = Math.max(16, height - dy);
+        nextTop = top + (height - nextHeight);
+      }
+    }
+
     if (shape.type === "rectangle") {
-      const s = initial as RectangleShape;
       return {
         ...shape,
-        width: Math.max(20, s.width + dx),
-        height: Math.max(20, s.height + dy),
+        x: nextLeft,
+        y: nextTop,
+        width: nextWidth,
+        height: nextHeight,
       };
     }
 
     if (shape.type === "cad") {
-      const s = initial as CadShape;
       return {
         ...shape,
-        width: Math.max(40, s.width + dx),
-        height: Math.max(60, s.height + dy),
+        x: nextLeft,
+        y: nextTop,
+        width: nextWidth,
+        height: nextHeight,
       };
     }
 
-    if (shape.type === "socket" || shape.type === "switch") {
-      const s = initial as SocketShape | SwitchShape;
-      return {
-        ...shape,
-        width: Math.max(16, s.width + dx),
-        height: Math.max(16, s.height + dy),
-      };
-    }
+    return {
+      ...shape,
+      x: nextLeft + nextWidth / 2,
+      y: nextTop + nextHeight / 2,
+      width: nextWidth,
+      height: nextHeight,
+    };
   }
 
   if (interaction.mode === "rotate") {
@@ -2597,8 +2702,20 @@ function hitTestHandle(px: number, py: number, shape: Shape): HandleType | null 
     shape.type === "cad"
   ) {
     const geometry = getSelectionGeometry(shape);
-    if (distance(px, py, geometry.rotateHandle.x, geometry.rotateHandle.y) <= 12) return "rotate";
-    if (distance(px, py, geometry.resizeHandle.x, geometry.resizeHandle.y) <= 12) return "resize-se";
+
+    if (distance(px, py, geometry.rotateHandle.x, geometry.rotateHandle.y) <= 12) {
+      return "rotate";
+    }
+
+    if (distance(px, py, geometry.corners.nw.x, geometry.corners.nw.y) <= 12) return "resize-nw";
+    if (distance(px, py, geometry.corners.ne.x, geometry.corners.ne.y) <= 12) return "resize-ne";
+    if (distance(px, py, geometry.corners.se.x, geometry.corners.se.y) <= 12) return "resize-se";
+    if (distance(px, py, geometry.corners.sw.x, geometry.corners.sw.y) <= 12) return "resize-sw";
+
+    if (distance(px, py, geometry.sides.n.x, geometry.sides.n.y) <= 12) return "resize-n";
+    if (distance(px, py, geometry.sides.e.x, geometry.sides.e.y) <= 12) return "resize-e";
+    if (distance(px, py, geometry.sides.s.x, geometry.sides.s.y) <= 12) return "resize-s";
+    if (distance(px, py, geometry.sides.w.x, geometry.sides.w.y) <= 12) return "resize-w";
   }
 
   return null;
@@ -2611,26 +2728,62 @@ function getSelectionGeometry(
     const cx = shape.x + shape.width / 2;
     const cy = shape.y + shape.height / 2;
 
-    const resizeHandle = rotatePoint(shape.x + shape.width, shape.y + shape.height, cx, cy, shape.rotation);
-    const topCenter = rotatePoint(shape.x + shape.width / 2, shape.y, cx, cy, shape.rotation);
-    const rotateHandle = rotatePoint(topCenter.x, topCenter.y - 28, topCenter.x, topCenter.y, shape.rotation);
+    const corners = {
+      nw: rotatePoint(shape.x, shape.y, cx, cy, shape.rotation),
+      ne: rotatePoint(shape.x + shape.width, shape.y, cx, cy, shape.rotation),
+      se: rotatePoint(shape.x + shape.width, shape.y + shape.height, cx, cy, shape.rotation),
+      sw: rotatePoint(shape.x, shape.y + shape.height, cx, cy, shape.rotation),
+    };
+
+    const sides = {
+      n: rotatePoint(shape.x + shape.width / 2, shape.y, cx, cy, shape.rotation),
+      e: rotatePoint(shape.x + shape.width, shape.y + shape.height / 2, cx, cy, shape.rotation),
+      s: rotatePoint(shape.x + shape.width / 2, shape.y + shape.height, cx, cy, shape.rotation),
+      w: rotatePoint(shape.x, shape.y + shape.height / 2, cx, cy, shape.rotation),
+    };
+
+    const topCenter = sides.n;
+    const rotateHandle = {
+      x: topCenter.x,
+      y: topCenter.y - 28,
+    };
 
     return {
       center: { x: cx, y: cy },
-      resizeHandle,
+      corners,
+      sides,
       rotateHandle,
     };
   }
 
+  const left = shape.x - shape.width / 2;
+  const top = shape.y - shape.height / 2;
   const cx = shape.x;
   const cy = shape.y;
-  const resizeHandle = rotatePoint(shape.x + shape.width / 2, shape.y + shape.height / 2, cx, cy, shape.rotation);
-  const topCenter = rotatePoint(shape.x, shape.y - shape.height / 2, cx, cy, shape.rotation);
-  const rotateHandle = rotatePoint(topCenter.x, topCenter.y - 28, topCenter.x, topCenter.y, shape.rotation);
+
+  const corners = {
+    nw: rotatePoint(left, top, cx, cy, shape.rotation),
+    ne: rotatePoint(left + shape.width, top, cx, cy, shape.rotation),
+    se: rotatePoint(left + shape.width, top + shape.height, cx, cy, shape.rotation),
+    sw: rotatePoint(left, top + shape.height, cx, cy, shape.rotation),
+  };
+
+  const sides = {
+    n: rotatePoint(shape.x, top, cx, cy, shape.rotation),
+    e: rotatePoint(left + shape.width, shape.y, cx, cy, shape.rotation),
+    s: rotatePoint(shape.x, top + shape.height, cx, cy, shape.rotation),
+    w: rotatePoint(left, shape.y, cx, cy, shape.rotation),
+  };
+
+  const rotateHandle = {
+    x: sides.n.x,
+    y: sides.n.y - 28,
+  };
 
   return {
     center: { x: cx, y: cy },
-    resizeHandle,
+    corners,
+    sides,
     rotateHandle,
   };
 }
@@ -2650,6 +2803,50 @@ function rotatePoint(px: number, py: number, cx: number, cy: number, angleDegVal
 
 function angleDeg(cx: number, cy: number, px: number, py: number) {
   return (Math.atan2(py - cy, px - cx) * 180) / Math.PI;
+}
+
+function getHandleCursor(handle: HandleType) {
+  switch (handle) {
+    case "move":
+      return "move";
+    case "resize-n":
+    case "resize-s":
+      return "ns-resize";
+    case "resize-e":
+    case "resize-w":
+      return "ew-resize";
+    case "resize-nw":
+    case "resize-se":
+      return "nwse-resize";
+    case "resize-ne":
+    case "resize-sw":
+      return "nesw-resize";
+    case "rotate":
+      return "crosshair";
+    case "line-start":
+    case "line-end":
+      return "move";
+    default:
+      return "default";
+  }
+}
+
+function isCornerResizeHandle(handle: HandleType) {
+  return (
+    handle === "resize-nw" ||
+    handle === "resize-ne" ||
+    handle === "resize-sw" ||
+    handle === "resize-se"
+  );
+}
+
+function isSideResizeHandle(handle: HandleType) {
+  return (
+    handle === "resize-n" ||
+    handle === "resize-s" ||
+    handle === "resize-e" ||
+    handle === "resize-w"
+  );
 }
 
 function orthogonalSnap(from: { x: number; y: number }, to: { x: number; y: number }, tolerance = 2) {
@@ -3349,35 +3546,33 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#dce7ff",
   },
   layerRowEditable: {
-  display: "grid",
-  gridTemplateColumns: "16px 1fr 30px",
-  alignItems: "center",
-  gap: 8,
-  fontSize: 13,
-  color: "#dce7ff",
-},
-
-layerNameInput: {
-  background: "#0c1330",
-  color: "#fff",
-  border: "1px solid #2a376f",
-  borderRadius: 8,
-  padding: "6px 8px",
-  width: "100%",
-  boxSizing: "border-box",
-  fontSize: 12,
-  height: 30,
-},
-
-layerDeleteBtn: {
-  width: 30,
-  height: 30,
-  borderRadius: 8,
-  border: "1px solid #8a3f4d",
-  background: "#4a1d24",
-  color: "#fff",
-  cursor: "pointer",
-  padding: 0,
-  lineHeight: 1,
-},
+    display: "grid",
+    gridTemplateColumns: "16px 1fr 30px",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 13,
+    color: "#dce7ff",
+  },
+  layerNameInput: {
+    background: "#0c1330",
+    color: "#fff",
+    border: "1px solid #2a376f",
+    borderRadius: 8,
+    padding: "6px 8px",
+    width: "100%",
+    boxSizing: "border-box",
+    fontSize: 12,
+    height: 30,
+  },
+  layerDeleteBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    border: "1px solid #8a3f4d",
+    background: "#4a1d24",
+    color: "#fff",
+    cursor: "pointer",
+    padding: 0,
+    lineHeight: 1,
+  },
 };
