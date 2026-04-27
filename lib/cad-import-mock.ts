@@ -1,4 +1,5 @@
 import type { CadAsset, CadLayer, CadPrimitive } from "@/lib/cad-types";
+import { parseDxfToCadAsset } from "@/lib/dxf-parser";
 
 function detectFormat(fileName: string): CadAsset["sourceFormat"] {
   const lower = fileName.toLowerCase();
@@ -16,7 +17,7 @@ function accentByFormat(format: CadAsset["sourceFormat"]) {
   return "#dce7ff";
 }
 
-export function createMockCadAssetFromImportedFile(file: File): CadAsset {
+function createMockCadAssetFromImportedFileFallback(file: File): CadAsset {
   const format = detectFormat(file.name);
   const accent = accentByFormat(format);
 
@@ -45,7 +46,6 @@ export function createMockCadAssetFromImportedFile(file: File): CadAsset {
         { x: 0, y: height },
       ],
     },
-
     {
       type: "polyline",
       layerId: "walls",
@@ -59,7 +59,6 @@ export function createMockCadAssetFromImportedFile(file: File): CadAsset {
         { x: 80, y: 720 },
       ],
     },
-
     {
       type: "line",
       layerId: "walls",
@@ -80,7 +79,6 @@ export function createMockCadAssetFromImportedFile(file: File): CadAsset {
       stroke: "#9fb0d1",
       strokeWidth: 6,
     },
-
     {
       type: "circle",
       layerId: "electrical",
@@ -123,7 +121,6 @@ export function createMockCadAssetFromImportedFile(file: File): CadAsset {
         { x: 920, y: 260 },
       ],
     },
-
     {
       type: "line",
       layerId: "dimensions",
@@ -154,7 +151,6 @@ export function createMockCadAssetFromImportedFile(file: File): CadAsset {
       stroke: "#ffbf47",
       strokeWidth: 1.5,
     },
-
     {
       type: "text",
       layerId: "text",
@@ -199,4 +195,15 @@ export function createMockCadAssetFromImportedFile(file: File): CadAsset {
       height,
     },
   };
+}
+
+export async function createMockCadAssetFromImportedFile(file: File): Promise<CadAsset> {
+  const format = detectFormat(file.name);
+
+  if (format === "dxf") {
+    const text = await file.text();
+    return parseDxfToCadAsset(file.name, text);
+  }
+
+  return createMockCadAssetFromImportedFileFallback(file);
 }
