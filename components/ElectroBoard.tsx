@@ -124,7 +124,112 @@ const defaultStyle: ShapeStyle = {
   opacity: 0.18,
   rotation: 0,
 };
+function rotatePoint(px: number, py: number, cx: number, cy: number, angleDegValue: number) {
+  const angle = (angleDegValue * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
 
+  const dx = px - cx;
+  const dy = py - cy;
+
+  return {
+    x: cx + dx * cos - dy * sin,
+    y: cy + dx * sin + dy * cos,
+  };
+}
+
+function getShapeCenter(shape: Shape) {
+  if (shape.type === "rectangle") {
+    return { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 };
+  }
+
+  if (shape.type === "circle") {
+    return { x: shape.x, y: shape.y };
+  }
+
+  if (shape.type === "socket" || shape.type === "switch") {
+    return { x: shape.x, y: shape.y };
+  }
+
+  if (shape.type === "line" || shape.type === "cable") {
+    return { x: (shape.x + shape.x2) / 2, y: (shape.y + shape.y2) / 2 };
+  }
+
+  return { x: 0, y: 0 };
+}
+
+function orthogonalSnap(from: { x: number; y: number }, to: { x: number; y: number }, tolerance = 2) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+
+  if (Math.abs(dx) <= tolerance) {
+    return { x: from.x, y: to.y };
+  }
+
+  if (Math.abs(dy) <= tolerance) {
+    return { x: to.x, y: from.y };
+  }
+
+  return to;
+}
+
+function getSelectionGeometry(shape: RectangleShape | SocketShape | SwitchShape) {
+  if (shape.type === "rectangle") {
+    const cx = shape.x + shape.width / 2;
+    const cy = shape.y + shape.height / 2;
+
+    const resizeHandle = rotatePoint(
+      shape.x + shape.width,
+      shape.y + shape.height,
+      cx,
+      cy,
+      shape.rotation
+    );
+
+    const topCenter = rotatePoint(
+      shape.x + shape.width / 2,
+      shape.y,
+      cx,
+      cy,
+      shape.rotation
+    );
+
+    const rotateHandle = rotatePoint(topCenter.x, topCenter.y - 28, topCenter.x, topCenter.y, shape.rotation);
+
+    return {
+      center: { x: cx, y: cy },
+      resizeHandle,
+      rotateHandle,
+    };
+  }
+
+  const cx = shape.x;
+  const cy = shape.y;
+
+  const resizeHandle = rotatePoint(
+    shape.x + shape.width / 2,
+    shape.y + shape.height / 2,
+    cx,
+    cy,
+    shape.rotation
+  );
+
+  const topCenter = rotatePoint(
+    shape.x,
+    shape.y - shape.height / 2,
+    cx,
+    cy,
+    shape.rotation
+  );
+
+  const rotateHandle = rotatePoint(topCenter.x, topCenter.y - 28, topCenter.x, topCenter.y, shape.rotation);
+
+  return {
+    center: { x: cx, y: cy },
+    resizeHandle,
+    rotateHandle,
+  };
+}
 export default function ElectroBoard() {
   const svgRef = useRef<SVGSVGElement | null>(null);
 
@@ -740,6 +845,7 @@ function renderSelectionOverlay(shape: Shape) {
   if (shape.type === "line" || shape.type === "cable") {
     const midX = (shape.x + shape.x2) / 2;
     const midY = (shape.y + shape.y2) / 2;
+
     return (
       <g>
         <circle cx={shape.x} cy={shape.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" />
@@ -754,21 +860,48 @@ function renderSelectionOverlay(shape: Shape) {
   if (shape.type === "circle") {
     return (
       <g>
-        {anchors.map((a) => <circle key={a.id} cx={a.x} cy={a.y} r="4" fill="#9ec1ff" stroke="#fff" strokeWidth="1.5" />)}
+        {anchors.map((a) => (
+          <circle key={a.id} cx={a.x} cy={a.y} r="4" fill="#9ec1ff" stroke="#fff" strokeWidth="1.5" />
+        ))}
         <circle cx={shape.x + shape.radius} cy={shape.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" />
       </g>
     );
   }
 
   if (shape.type === "rectangle" || shape.type === "socket" || shape.type === "switch") {
-    const box = getSelectionBox(shape);
-    const rotateHandle = { x: box.cx, y: box.y - 28 };
+    const anchors = getShapeAnchors(shape);
+    const geometry = getSelectionGeometry(shape);
+
     return (
       <g>
-        {anchors.map((a) => <circle key={a.id} cx={a.x} cy={a.y} r="4" fill="#9ec1ff" stroke="#fff" strokeWidth="1.5" />)}
-        <circle cx={box.x + box.width} cy={box.y + box.height} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" />
-        <line x1={box.cx} y1={box.y} x2={rotateHandle.x} y2={rotateHandle.y} stroke="#79a6ff" strokeWidth="2" />
-        <circle cx={rotateHandle.x} cy={rotateHandle.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" />
+        {anchors.map((a) => (
+          <circle key={a.id} cx={a.x} cy={a.y} r="4" fill="#9ec1ff" stroke="#fff" strokeWidth="1.5" />
+        ))}
+        <line
+          x1={geometry.center.x}
+          y1={geometry.center.y}
+          x2={geometry.rotateHandle.x}
+          y2={geometry.rotateHandle.y}
+          stroke="#79a6ff"
+          strokeWidth="2"
+          opacity="0.7"
+        />
+        <circle
+          cx={geometry.resizeHandle.x}
+          cy={geometry.resizeHandle.y}
+          r="8"
+          fill="#fff"
+          stroke="#3d63ff"
+          strokeWidth="3"
+        />
+        <circle
+          cx={geometry.rotateHandle.x}
+          cy={geometry.rotateHandle.y}
+          r="8"
+          fill="#fff"
+          stroke="#3d63ff"
+          strokeWidth="3"
+        />
       </g>
     );
   }
@@ -784,40 +917,73 @@ function transformShape(shape: Shape, interaction: InteractionState, point: { x:
   if (interaction.mode === "move") {
     if (shape.type === "line" || shape.type === "cable") {
       const s = initial as LineShape;
-      return { ...shape, x: s.x + dx, y: s.y + dy, x2: s.x2 + dx, y2: s.y2 + dy };
+      return {
+        ...shape,
+        x: s.x + dx,
+        y: s.y + dy,
+        x2: s.x2 + dx,
+        y2: s.y2 + dy,
+      };
     }
+
     if (shape.type === "circle") {
       const s = initial as CircleShape;
       return { ...shape, x: s.x + dx, y: s.y + dy };
     }
+
     if (shape.type === "rectangle") {
       const s = initial as RectangleShape;
       return { ...shape, x: s.x + dx, y: s.y + dy };
     }
+
     const s = initial as SocketShape | SwitchShape;
     return { ...shape, x: s.x + dx, y: s.y + dy };
   }
 
   if (interaction.mode === "line-start" && (shape.type === "line" || shape.type === "cable")) {
-    return { ...shape, x: point.x, y: point.y, startAttachment: undefined };
+    const snapped = orthogonalSnap({ x: shape.x2, y: shape.y2 }, point, 2);
+    return {
+      ...shape,
+      x: snapped.x,
+      y: snapped.y,
+      startAttachment: undefined,
+    };
   }
 
   if (interaction.mode === "line-end" && (shape.type === "line" || shape.type === "cable")) {
-    return { ...shape, x2: point.x, y2: point.y, endAttachment: undefined };
+    const snapped = orthogonalSnap({ x: shape.x, y: shape.y }, point, 2);
+    return {
+      ...shape,
+      x2: snapped.x,
+      y2: snapped.y,
+      endAttachment: undefined,
+    };
   }
 
   if (interaction.mode === "resize-circle" && shape.type === "circle") {
-    return { ...shape, radius: Math.max(10, distance(shape.x, shape.y, point.x, point.y)) };
+    return {
+      ...shape,
+      radius: Math.max(10, distance(shape.x, shape.y, point.x, point.y)),
+    };
   }
 
   if (interaction.mode === "resize-se") {
     if (shape.type === "rectangle") {
       const s = initial as RectangleShape;
-      return { ...shape, width: Math.max(20, s.width + dx), height: Math.max(20, s.height + dy) };
+      return {
+        ...shape,
+        width: Math.max(20, s.width + dx),
+        height: Math.max(20, s.height + dy),
+      };
     }
+
     if (shape.type === "socket" || shape.type === "switch") {
       const s = initial as SocketShape | SwitchShape;
-      return { ...shape, width: Math.max(16, s.width + dx), height: Math.max(16, s.height + dy) };
+      return {
+        ...shape,
+        width: Math.max(16, s.width + dx),
+        height: Math.max(16, s.height + dy),
+      };
     }
   }
 
@@ -826,11 +992,18 @@ function transformShape(shape: Shape, interaction: InteractionState, point: { x:
       const s = initial as RectangleShape;
       const cx = s.x + s.width / 2;
       const cy = s.y + s.height / 2;
-      return { ...shape, rotation: angleDeg(cx, cy, point.x, point.y) + 90 };
+      return {
+        ...shape,
+        rotation: angleDeg(cx, cy, point.x, point.y) + 90,
+      };
     }
+
     if (shape.type === "socket" || shape.type === "switch") {
       const s = initial as SocketShape | SwitchShape;
-      return { ...shape, rotation: angleDeg(s.x, s.y, point.x, point.y) + 90 };
+      return {
+        ...shape,
+        rotation: angleDeg(s.x, s.y, point.x, point.y) + 90,
+      };
     }
   }
 
@@ -841,6 +1014,7 @@ function hitTestHandle(px: number, py: number, shape: Shape): HandleType | null 
   if (shape.type === "line" || shape.type === "cable") {
     const midX = (shape.x + shape.x2) / 2;
     const midY = (shape.y + shape.y2) / 2;
+
     if (distance(px, py, shape.x, shape.y) <= 12) return "line-start";
     if (distance(px, py, shape.x2, shape.y2) <= 12) return "line-end";
     if (distance(px, py, midX, midY) <= 12) return "move";
@@ -853,11 +1027,10 @@ function hitTestHandle(px: number, py: number, shape: Shape): HandleType | null 
   }
 
   if (shape.type === "rectangle" || shape.type === "socket" || shape.type === "switch") {
-    const box = getSelectionBox(shape);
-    const rotateHandle = { x: box.cx, y: box.y - 28 };
-    const resizeHandle = { x: box.x + box.width, y: box.y + box.height };
-    if (distance(px, py, rotateHandle.x, rotateHandle.y) <= 12) return "rotate";
-    if (distance(px, py, resizeHandle.x, resizeHandle.y) <= 12) return "resize-se";
+    const geometry = getSelectionGeometry(shape);
+
+    if (distance(px, py, geometry.rotateHandle.x, geometry.rotateHandle.y) <= 12) return "rotate";
+    if (distance(px, py, geometry.resizeHandle.x, geometry.resizeHandle.y) <= 12) return "resize-se";
   }
 
   return null;
@@ -899,23 +1072,47 @@ function getShapeAnchors(shape: Shape): AnchorPoint[] {
   }
 
   if (shape.type === "rectangle") {
-    return [
-      { id: "center", x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 },
+    const cx = shape.x + shape.width / 2;
+    const cy = shape.y + shape.height / 2;
+
+    const raw = [
+      { id: "center", x: cx, y: cy },
       { id: "top", x: shape.x + shape.width / 2, y: shape.y },
       { id: "right", x: shape.x + shape.width, y: shape.y + shape.height / 2 },
       { id: "bottom", x: shape.x + shape.width / 2, y: shape.y + shape.height },
       { id: "left", x: shape.x, y: shape.y + shape.height / 2 },
     ];
+
+    return raw.map((a) =>
+      a.id === "center"
+        ? a
+        : {
+            id: a.id,
+            ...rotatePoint(a.x, a.y, cx, cy, shape.rotation),
+          }
+    );
   }
 
   if (shape.type === "socket" || shape.type === "switch") {
-    return [
+    const cx = shape.x;
+    const cy = shape.y;
+
+    const raw = [
       { id: "center", x: shape.x, y: shape.y },
       { id: "top", x: shape.x, y: shape.y - shape.height / 2 },
       { id: "right", x: shape.x + shape.width / 2, y: shape.y },
       { id: "bottom", x: shape.x, y: shape.y + shape.height / 2 },
       { id: "left", x: shape.x - shape.width / 2, y: shape.y },
     ];
+
+    return raw.map((a) =>
+      a.id === "center"
+        ? a
+        : {
+            id: a.id,
+            ...rotatePoint(a.x, a.y, cx, cy, shape.rotation),
+          }
+    );
   }
 
   return [];
