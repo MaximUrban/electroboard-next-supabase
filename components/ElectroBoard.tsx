@@ -3259,140 +3259,182 @@ function getSquareHandleDistance(
 ) {
   return distance(screenPoint.x, screenPoint.y, target.x, target.y);
 }
+
 function hitTestHandleScreen(
-
   screenPoint: { x: number; y: number },
-
   shape: Shape,
-
   camera: CameraState
-
 ): HandleType | null {
+  const cornerVisualSizePx = 12;
+  const cornerHitSizePx = 16;
+  const sideVisualSizePx = 10;
+  const sideHandleHitSizePx = 14;
+  const edgeStripThicknessPx = 8;
+  const rotateVisualSizePx = 12;
+  const rotateHitSizePx = 16;
+  const lineEndSizePx = 16;
+  const lineMidSizePx = 14;
+  const circleHandleSizePx = 16;
 
-  const cornerSize = 16;
-
-  const sideSize = 14;
-
-  const rotateSize = 16;
-
-  const lineEndSize = 16;
-
-  const lineMidSize = 14;
-
-  const isInsideSquare = (
-
-    worldX: number,
-
-    worldY: number,
-
-    size: number
-
-  ) => {
-
-    const p = projectWorldToScreen(worldX, worldY, camera);
-
-    const half = size / 2;
-
-    return (
-
-      screenPoint.x >= p.x - half &&
-
-      screenPoint.x <= p.x + half &&
-
-      screenPoint.y >= p.y - half &&
-
-      screenPoint.y <= p.y + half
-
-    );
-
-  };
+  const worldToScreen = (worldX: number, worldY: number) =>
+    projectWorldToScreen(worldX, worldY, camera);
 
   if (shape.type === "line" || shape.type === "cable") {
+    const start = worldToScreen(shape.x, shape.y);
+    const end = worldToScreen(shape.x2, shape.y2);
+    const mid = worldToScreen((shape.x + shape.x2) / 2, (shape.y + shape.y2) / 2);
 
-    const midX = (shape.x + shape.x2) / 2;
+    const candidates: Array<{
+      type: HandleType;
+      point: { x: number; y: number };
+      size: number;
+    }> = [
+      { type: "line-start", point: start, size: lineEndSizePx },
+      { type: "line-end", point: end, size: lineEndSizePx },
+      { type: "move", point: mid, size: lineMidSizePx },
+    ];
 
-    const midY = (shape.y + shape.y2) / 2;
+    const nearest = candidates
+      .filter((candidate) =>
+        isScreenPointInsideCenteredSquare(screenPoint, candidate.point, candidate.size)
+      )
+      .sort(
+        (a, b) =>
+          getSquareHandleDistance(screenPoint, a.point) -
+          getSquareHandleDistance(screenPoint, b.point)
+      )[0];
 
-    if (isInsideSquare(shape.x, shape.y, lineEndSize)) return "line-start";
-
-    if (isInsideSquare(shape.x2, shape.y2, lineEndSize)) return "line-end";
-
-    if (isInsideSquare(midX, midY, lineMidSize)) return "move";
-
-    return null;
-
+    return nearest ? nearest.type : null;
   }
 
   if (shape.type === "circle") {
+    const handle = worldToScreen(shape.x + shape.radius, shape.y);
 
-    if (isInsideSquare(shape.x + shape.radius, shape.y, cornerSize)) {
-
+    if (isScreenPointInsideCenteredSquare(screenPoint, handle, circleHandleSizePx)) {
       return "resize-circle";
-
     }
 
     return null;
-
   }
 
   if (
-
     shape.type === "rectangle" ||
-
     shape.type === "socket" ||
-
     shape.type === "switch" ||
-
     shape.type === "cad"
-
   ) {
-
     const geometry = getSelectionGeometry(shape);
 
-    if (
+    const corners = {
+      nw: worldToScreen(geometry.corners.nw.x, geometry.corners.nw.y),
+      ne: worldToScreen(geometry.corners.ne.x, geometry.corners.ne.y),
+      se: worldToScreen(geometry.corners.se.x, geometry.corners.se.y),
+      sw: worldToScreen(geometry.corners.sw.x, geometry.corners.sw.y),
+    };
 
-      isInsideSquare(
+    const sides = {
+      n: worldToScreen(geometry.sides.n.x, geometry.sides.n.y),
+      e: worldToScreen(geometry.sides.e.x, geometry.sides.e.y),
+      s: worldToScreen(geometry.sides.s.x, geometry.sides.s.y),
+      w: worldToScreen(geometry.sides.w.x, geometry.sides.w.y),
+    };
 
-        geometry.rotateHandle.x,
-
-        geometry.rotateHandle.y,
-
-        rotateSize
-
-      )
-
-    ) {
-
+    const rotateHandle = worldToScreen(geometry.rotateHandle.x, geometry.rotateHandle.y);
+    if (isScreenPointInsideCenteredSquare(screenPoint, rotateHandle, rotateHitSizePx)) {
       return "rotate";
-
     }
 
-    if (isInsideSquare(geometry.corners.nw.x, geometry.corners.nw.y, cornerSize)) return "resize-nw";
+    const cornerCandidates: Array<{ type: HandleType; point: { x: number; y: number } }> = [
+      { type: "resize-nw", point: corners.nw },
+      { type: "resize-ne", point: corners.ne },
+      { type: "resize-se", point: corners.se },
+      { type: "resize-sw", point: corners.sw },
+    ];
 
-    if (isInsideSquare(geometry.corners.ne.x, geometry.corners.ne.y, cornerSize)) return "resize-ne";
+    const nearestCorner = cornerCandidates
+      .filter((candidate) =>
+        isScreenPointInsideCenteredSquare(screenPoint, candidate.point, cornerHitSizePx)
+      )
+      .sort(
+        (a, b) =>
+          getSquareHandleDistance(screenPoint, a.point) -
+          getSquareHandleDistance(screenPoint, b.point)
+      )[0];
 
-    if (isInsideSquare(geometry.corners.se.x, geometry.corners.se.y, cornerSize)) return "resize-se";
+    if (nearestCorner) {
+      return nearestCorner.type;
+    }
 
-    if (isInsideSquare(geometry.corners.sw.x, geometry.corners.sw.y, cornerSize)) return "resize-sw";
+    const edgeCandidates: Array<{
+      type: HandleType;
+      point: { x: number; y: number };
+      a: { x: number; y: number };
+      b: { x: number; y: number };
+      handleSize: number;
+      dist: number;
+    }> = [
+      {
+        type: "resize-n",
+        point: sides.n,
+        a: corners.nw,
+        b: corners.ne,
+        handleSize: sideHandleHitSizePx,
+        dist: distancePointToSegment(screenPoint.x, screenPoint.y, corners.nw.x, corners.nw.y, corners.ne.x, corners.ne.y),
+      },
+      {
+        type: "resize-e",
+        point: sides.e,
+        a: corners.ne,
+        b: corners.se,
+        handleSize: sideHandleHitSizePx,
+        dist: distancePointToSegment(screenPoint.x, screenPoint.y, corners.ne.x, corners.ne.y, corners.se.x, corners.se.y),
+      },
+      {
+        type: "resize-s",
+        point: sides.s,
+        a: corners.sw,
+        b: corners.se,
+        handleSize: sideHandleHitSizePx,
+        dist: distancePointToSegment(screenPoint.x, screenPoint.y, corners.sw.x, corners.sw.y, corners.se.x, corners.se.y),
+      },
+      {
+        type: "resize-w",
+        point: sides.w,
+        a: corners.nw,
+        b: corners.sw,
+        handleSize: sideHandleHitSizePx,
+        dist: distancePointToSegment(screenPoint.x, screenPoint.y, corners.nw.x, corners.nw.y, corners.sw.x, corners.sw.y),
+      },
+    ];
 
-    if (isInsideSquare(geometry.sides.n.x, geometry.sides.n.y, sideSize)) return "resize-n";
+    const sideHandleHit = edgeCandidates
+      .filter((candidate) =>
+        isScreenPointInsideCenteredSquare(screenPoint, candidate.point, candidate.handleSize)
+      )
+      .sort((a, b) => a.dist - b.dist)[0];
 
-    if (isInsideSquare(geometry.sides.e.x, geometry.sides.e.y, sideSize)) return "resize-e";
+    if (sideHandleHit) {
+      return sideHandleHit.type;
+    }
 
-    if (isInsideSquare(geometry.sides.s.x, geometry.sides.s.y, sideSize)) return "resize-s";
+    const nearestEdge = edgeCandidates
+      .filter((candidate) => candidate.dist <= edgeStripThicknessPx)
+      .sort((a, b) => a.dist - b.dist)[0];
 
-    if (isInsideSquare(geometry.sides.w.x, geometry.sides.w.y, sideSize)) return "resize-w";
-
+    if (nearestEdge) {
+      return nearestEdge.type;
+    }
   }
 
   return null;
-
-}  
+}
+  
 function renderSelectionOverlayScreen(shape: Shape, camera: CameraState) {
-  const mainSize = 18;
-  const sideSize = 16;
-  const lineEndSize = 18;
-  const lineMidSize = 16;
+  const cornerVisualSize = 12;
+  const sideVisualSize = 10;
+  const rotateVisualSize = 12;
+  const lineEndSize = 16;
+  const lineMidSize = 14;
   const anchorR = 4;
 
   const renderSquareHandle = (
@@ -3451,7 +3493,7 @@ function renderSelectionOverlayScreen(shape: Shape, camera: CameraState) {
           />
         ))}
 
-        {renderSquareHandle(handle.x, handle.y, mainSize, "#fff", "#3d63ff", 3)}
+        {renderSquareHandle(handle.x, handle.y, cornerVisualSize, "#fff", "#3d63ff", 3)}
       </g>
     );
   }
@@ -3500,6 +3542,43 @@ function renderSelectionOverlayScreen(shape: Shape, camera: CameraState) {
         ))}
 
         <line
+          x1={corners.nw.x}
+          y1={corners.nw.y}
+          x2={corners.ne.x}
+          y2={corners.ne.y}
+          stroke="#79a6ff"
+          strokeWidth="1.5"
+          opacity="0.95"
+        />
+        <line
+          x1={corners.ne.x}
+          y1={corners.ne.y}
+          x2={corners.se.x}
+          y2={corners.se.y}
+          stroke="#79a6ff"
+          strokeWidth="1.5"
+          opacity="0.95"
+        />
+        <line
+          x1={corners.se.x}
+          y1={corners.se.y}
+          x2={corners.sw.x}
+          y2={corners.sw.y}
+          stroke="#79a6ff"
+          strokeWidth="1.5"
+          opacity="0.95"
+        />
+        <line
+          x1={corners.sw.x}
+          y1={corners.sw.y}
+          x2={corners.nw.x}
+          y2={corners.nw.y}
+          stroke="#79a6ff"
+          strokeWidth="1.5"
+          opacity="0.95"
+        />
+
+        <line
           x1={center.x}
           y1={center.y}
           x2={rotateHandle.x}
@@ -3509,17 +3588,17 @@ function renderSelectionOverlayScreen(shape: Shape, camera: CameraState) {
           opacity="0.7"
         />
 
-        {renderSquareHandle(corners.nw.x, corners.nw.y, mainSize, "#fff", "#3d63ff", 3)}
-        {renderSquareHandle(corners.ne.x, corners.ne.y, mainSize, "#fff", "#3d63ff", 3)}
-        {renderSquareHandle(corners.se.x, corners.se.y, mainSize, "#fff", "#3d63ff", 3)}
-        {renderSquareHandle(corners.sw.x, corners.sw.y, mainSize, "#fff", "#3d63ff", 3)}
+        {renderSquareHandle(corners.nw.x, corners.nw.y, cornerVisualSize, "#fff", "#3d63ff", 2.5)}
+        {renderSquareHandle(corners.ne.x, corners.ne.y, cornerVisualSize, "#fff", "#3d63ff", 2.5)}
+        {renderSquareHandle(corners.se.x, corners.se.y, cornerVisualSize, "#fff", "#3d63ff", 2.5)}
+        {renderSquareHandle(corners.sw.x, corners.sw.y, cornerVisualSize, "#fff", "#3d63ff", 2.5)}
 
-        {renderSquareHandle(sides.n.x, sides.n.y, sideSize, "#dfe8ff", "#3d63ff", 2.5)}
-        {renderSquareHandle(sides.e.x, sides.e.y, sideSize, "#dfe8ff", "#3d63ff", 2.5)}
-        {renderSquareHandle(sides.s.x, sides.s.y, sideSize, "#dfe8ff", "#3d63ff", 2.5)}
-        {renderSquareHandle(sides.w.x, sides.w.y, sideSize, "#dfe8ff", "#3d63ff", 2.5)}
+        {renderSquareHandle(sides.n.x, sides.n.y, sideVisualSize, "#dfe8ff", "#3d63ff", 2)}
+        {renderSquareHandle(sides.e.x, sides.e.y, sideVisualSize, "#dfe8ff", "#3d63ff", 2)}
+        {renderSquareHandle(sides.s.x, sides.s.y, sideVisualSize, "#dfe8ff", "#3d63ff", 2)}
+        {renderSquareHandle(sides.w.x, sides.w.y, sideVisualSize, "#dfe8ff", "#3d63ff", 2)}
 
-        {renderSquareHandle(rotateHandle.x, rotateHandle.y, mainSize, "#fff", "#3d63ff", 3)}
+        {renderSquareHandle(rotateHandle.x, rotateHandle.y, rotateVisualSize, "#fff", "#3d63ff", 2.5)}
       </g>
     );
   }
