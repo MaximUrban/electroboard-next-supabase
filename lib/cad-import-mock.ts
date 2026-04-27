@@ -41,9 +41,9 @@ function createMockCadAssetFromImportedFileFallback(file: File): CadAsset {
       closed: true,
       points: [
         { x: 0, y: 0 },
-        { x: width, y: 0 },
-        { x: width, y: height },
-        { x: 0, y: height },
+        { x: 1200, y: 0 },
+        { x: 1200, y: 800 },
+        { x: 0, y: 800 },
       ],
     },
     {
@@ -191,8 +191,8 @@ function createMockCadAssetFromImportedFileFallback(file: File): CadAsset {
     bounds: {
       x: 0,
       y: 0,
-      width,
-      height,
+      width: 1200,
+      height: 800,
     },
   };
 }
