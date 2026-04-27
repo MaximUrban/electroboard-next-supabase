@@ -155,11 +155,25 @@ function schneiderRenditionUrl(docRef: string) {
 function turkeyArticleImageUrl(article: string) {
   return schneiderRenditionUrl(`${article}_IoP-Default`);
 }
+
 const TURKEY_IMAGE_DOCREF_OVERRIDES: Partial<Record<string, string>> = {
   EZ9F51120: "PB111299",
   EZ9F51216: "PB111300",
   EZ9F51240: "PB111300",
 };
+
+function resolveTurkeyCatalogImageUrl(article: string, explicitDocRef?: string) {
+  if (explicitDocRef) {
+    return schneiderRenditionUrl(explicitDocRef);
+  }
+
+  const overrideDocRef = TURKEY_IMAGE_DOCREF_OVERRIDES[article];
+  if (overrideDocRef) {
+    return schneiderRenditionUrl(overrideDocRef);
+  }
+
+  return turkeyArticleImageUrl(article);
+}
 
 function buildItem(params: {
   id: string;
@@ -182,17 +196,13 @@ function buildItem(params: {
     article: params.article,
     modules: params.modules,
     catalogImageUrl: params.countries.includes("TR")
-  ? schneiderRenditionUrl(
-      params.imageDocRef ||
-        TURKEY_IMAGE_DOCREF_OVERRIDES[params.article] ||
-        `${params.article}_IoP-Default`
-    )
-  : makeCatalogPreview({
-      brand: "Schneider",
-      series: params.series,
-      article: params.article,
-      line2: params.category.toUpperCase(),
-    }),
+      ? resolveTurkeyCatalogImageUrl(params.article, params.imageDocRef)
+      : makeCatalogPreview({
+          brand: "Schneider",
+          series: params.series,
+          article: params.article,
+          line2: params.category.toUpperCase(),
+        }),
     imageDocRef: params.imageDocRef,
     productUrl: params.productUrl,
     titleByCountry: params.titleByCountry,
@@ -408,7 +418,7 @@ const staticDevices: DeviceLibrarySourceItem[] = [
   buildTurkeyMcb("EZ9F51106", "Easy9", 1, 6, "C", "10kA"),
   buildTurkeyMcb("EZ9F51110", "Easy9", 1, 10, "C", "10kA"),
   buildTurkeyMcb("EZ9F51116", "Easy9", 1, 16, "C", "10kA"),
-  buildTurkeyMcb("EZ9F51120", "Easy9", 1, 20, "C", "10kA", "PB111351"),
+  buildTurkeyMcb("EZ9F51120", "Easy9", 1, 20, "C", "10kA"),
   buildTurkeyMcb("EZ9F51125", "Easy9", 1, 25, "C", "10kA"),
   buildTurkeyMcb("EZ9F51132", "Easy9", 1, 32, "C", "10kA"),
   buildTurkeyMcb("EZ9F51140", "Easy9", 1, 40, "C", "10kA"),
@@ -417,11 +427,11 @@ const staticDevices: DeviceLibrarySourceItem[] = [
 
   buildTurkeyMcb("EZ9F51206", "Easy9", 2, 6, "C", "10kA"),
   buildTurkeyMcb("EZ9F51210", "Easy9", 2, 10, "C", "10kA", "PB111356"),
-  buildTurkeyMcb("EZ9F51216", "Easy9", 2, 16, "C", "10kA", "PB111357"),
+  buildTurkeyMcb("EZ9F51216", "Easy9", 2, 16, "C", "10kA"),
   buildTurkeyMcb("EZ9F51220", "Easy9", 2, 20, "C", "10kA"),
   buildTurkeyMcb("EZ9F51225", "Easy9", 2, 25, "C", "10kA"),
   buildTurkeyMcb("EZ9F51232", "Easy9", 2, 32, "C", "10kA"),
-  buildTurkeyMcb("EZ9F51240", "Easy9", 2, 40, "C", "10kA", "PB111360"),
+  buildTurkeyMcb("EZ9F51240", "Easy9", 2, 40, "C", "10kA"),
   buildTurkeyMcb("EZ9F51250", "Easy9", 2, 50, "C", "10kA"),
   buildTurkeyMcb("EZ9F51263", "Easy9", 2, 63, "C", "10kA"),
 
