@@ -2655,6 +2655,48 @@ function moveShapeBy(shape: Shape, dx: number, dy: number): Shape {
 }
 
 function getAlignmentCandidates(shape: Shape) {
+  if (
+    shape.type === "rectangle" ||
+    shape.type === "cad" ||
+    shape.type === "socket" ||
+    shape.type === "switch"
+  ) {
+    const geometry = getSelectionGeometry(shape);
+
+    const vertical = [
+      { key: "left", value: Math.min(geometry.corners.nw.x, geometry.corners.sw.x) },
+      { key: "centerX", value: geometry.center.x },
+      { key: "right", value: Math.max(geometry.corners.ne.x, geometry.corners.se.x) },
+      { key: "nw", value: geometry.corners.nw.x },
+      { key: "ne", value: geometry.corners.ne.x },
+      { key: "se", value: geometry.corners.se.x },
+      { key: "sw", value: geometry.corners.sw.x },
+      { key: "n", value: geometry.sides.n.x },
+      { key: "e", value: geometry.sides.e.x },
+      { key: "s", value: geometry.sides.s.x },
+      { key: "w", value: geometry.sides.w.x },
+    ];
+
+    const horizontal = [
+      { key: "top", value: Math.min(geometry.corners.nw.y, geometry.corners.ne.y) },
+      { key: "centerY", value: geometry.center.y },
+      { key: "bottom", value: Math.max(geometry.corners.sw.y, geometry.corners.se.y) },
+      { key: "nw", value: geometry.corners.nw.y },
+      { key: "ne", value: geometry.corners.ne.y },
+      { key: "se", value: geometry.corners.se.y },
+      { key: "sw", value: geometry.corners.sw.y },
+      { key: "n", value: geometry.sides.n.y },
+      { key: "e", value: geometry.sides.e.y },
+      { key: "s", value: geometry.sides.s.y },
+      { key: "w", value: geometry.sides.w.y },
+    ];
+
+    return {
+      vertical: uniqueAlignmentCandidates(vertical),
+      horizontal: uniqueAlignmentCandidates(horizontal),
+    };
+  }
+
   const bounds = getShapeBounds(shape);
   if (!bounds) return null;
 
@@ -2670,6 +2712,20 @@ function getAlignmentCandidates(shape: Shape) {
       { key: "bottom", value: bounds.bottom },
     ],
   };
+}
+
+
+function uniqueAlignmentCandidates(
+  candidates: Array<{ key: string; value: number }>
+) {
+  const seen = new Set<string>();
+
+  return candidates.filter((candidate) => {
+    const token = `${candidate.key}:${candidate.value.toFixed(4)}`;
+    if (seen.has(token)) return false;
+    seen.add(token);
+    return true;
+  });
 }
 
 function computeSnappedMove(
@@ -2761,26 +2817,26 @@ function getResizeRelevantKeys(
   const vertical: string[] = [];
   const horizontal: string[] = [];
 
-  if (mode === "resize-e") vertical.push(resizeFromCenter ? "left" : "right");
-  if (mode === "resize-w") vertical.push("left");
-  if (mode === "resize-n") horizontal.push("top");
-  if (mode === "resize-s") horizontal.push(resizeFromCenter ? "top" : "bottom");
+  if (mode === "resize-e") vertical.push(resizeFromCenter ? "left" : "right", "e");
+  if (mode === "resize-w") vertical.push("left", "w");
+  if (mode === "resize-n") horizontal.push("top", "n");
+  if (mode === "resize-s") horizontal.push(resizeFromCenter ? "top" : "bottom", "s");
 
   if (mode === "resize-ne") {
-    vertical.push("right");
-    horizontal.push("top");
+    vertical.push("right", "ne");
+    horizontal.push("top", "ne");
   }
   if (mode === "resize-nw") {
-    vertical.push("left");
-    horizontal.push("top");
+    vertical.push("left", "nw");
+    horizontal.push("top", "nw");
   }
   if (mode === "resize-se") {
-    vertical.push(resizeFromCenter ? "left" : "right");
-    horizontal.push(resizeFromCenter ? "top" : "bottom");
+    vertical.push(resizeFromCenter ? "left" : "right", "se");
+    horizontal.push(resizeFromCenter ? "top" : "bottom", "se");
   }
   if (mode === "resize-sw") {
-    vertical.push("left");
-    horizontal.push(resizeFromCenter ? "top" : "bottom");
+    vertical.push("left", "sw");
+    horizontal.push(resizeFromCenter ? "top" : "bottom", "sw");
   }
 
   if (resizeFromCenter) {
@@ -2893,22 +2949,28 @@ function applyResizeSnapDelta(
   if (!bounds) return shape;
 
   if (orientation === "vertical") {
-    if (ownKey === "right") {
+    const affectsLeft = ownKey === "left" || ownKey === "nw" || ownKey === "sw" || ownKey === "w";
+    const affectsRight = ownKey === "right" || ownKey === "ne" || ownKey === "se" || ownKey === "e";
+
+    if (affectsRight) {
       bounds.right += delta;
       if (resizeFromCenter) bounds.left -= delta;
     }
 
-    if (ownKey === "left") {
+    if (affectsLeft) {
       bounds.left += delta;
       if (resizeFromCenter) bounds.right -= delta;
     }
   } else {
-    if (ownKey === "bottom") {
+    const affectsTop = ownKey === "top" || ownKey === "nw" || ownKey === "ne" || ownKey === "n";
+    const affectsBottom = ownKey === "bottom" || ownKey === "sw" || ownKey === "se" || ownKey === "s";
+
+    if (affectsBottom) {
       bounds.bottom += delta;
       if (resizeFromCenter) bounds.top -= delta;
     }
 
-    if (ownKey === "top") {
+    if (affectsTop) {
       bounds.top += delta;
       if (resizeFromCenter) bounds.bottom -= delta;
     }
