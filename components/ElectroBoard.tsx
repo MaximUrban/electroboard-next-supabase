@@ -81,7 +81,7 @@ type SwitchShape = BaseShape & {
 };
 
 type Shape =
-  | RectangleShape
+  | Shape
   | CircleShape
   | LineShape
   | SocketShape
@@ -610,10 +610,10 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       return;
     }
 
-    if (tool === "rectangle") {
-      const shape: RectangleShape = {
+    if (tool === "") {
+      const shape: Shape = {
         id: crypto.randomUUID(),
-        type: "rectangle",
+        type: "",
         x: point.x,
         y: point.y,
         width: 140,
@@ -850,7 +850,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
           { value: "cable", label: "Кабель" },
         ]
       : [
-          { value: "rectangle", label: "Прямоугольник" },
+          { value: "", label: "Прямоугольник" },
           { value: "circle", label: "Окружность" },
           { value: "socket", label: "Розетка" },
           { value: "switch", label: "Выключатель" },
@@ -878,7 +878,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
         <div style={styles.leftBlock}>
           <button style={tool === "select" ? styles.btnActive : styles.btn} onClick={() => setTool("select")}>Выбор</button>
-          <button style={tool === "rectangle" ? styles.btnActive : styles.btn} onClick={() => setTool("rectangle")}>Прямоугольник</button>
+          <button style={tool === "" ? styles.btnActive : styles.btn} onClick={() => setTool("")}>Прямоугольник</button>
           <button style={tool === "circle" ? styles.btnActive : styles.btn} onClick={() => setTool("circle")}>Окружность</button>
           <button style={tool === "line" ? styles.btnActive : styles.btn} onClick={() => setTool("line")}>Линия</button>
           <button style={tool === "cable" ? styles.btnActive : styles.btn} onClick={() => setTool("cable")}>Кабель</button>
@@ -1317,7 +1317,7 @@ function MiniMap({
             );
           }
 
-          if (shape.type === "rectangle") {
+          if (shape.type === "") {
             const p = worldToMini(shape.x, shape.y);
             return (
               <rect
@@ -1616,50 +1616,62 @@ function convertShapeType(shape: Shape, nextType: Shape["type"]): Shape {
   }
 
   if (nextType === "rectangle") {
-    const width = shape.type === "circle" ? shape.radius * 2 : shape.width;
-    const height = shape.type === "circle" ? shape.radius * 2 : shape.height;
+  let width = 80;
+  let height = 80;
 
-    return {
-      id: shape.id,
-      type: "rectangle",
-      x: center.x - width / 2,
-      y: center.y - height / 2,
-      width,
-      height,
-      label: shape.label,
-      groupName: shape.groupName,
-      cableType: shape.cableType,
-      strokeColor: shape.strokeColor,
-      fillColor: shape.fillColor,
-      strokeWidth: shape.strokeWidth,
-      strokeStyle: shape.strokeStyle,
-      opacity: shape.opacity,
-      rotation: shape.rotation,
-    };
+  if (shape.type === "circle") {
+    width = shape.radius * 2;
+    height = shape.radius * 2;
+  } else if (
+    shape.type === "rectangle" ||
+    shape.type === "socket" ||
+    shape.type === "switch"
+  ) {
+    width = shape.width;
+    height = shape.height;
   }
+
+  return {
+    id: shape.id,
+    type: "rectangle",
+    x: center.x - width / 2,
+    y: center.y - height / 2,
+    width,
+    height,
+    label: shape.label,
+    groupName: shape.groupName,
+    cableType: shape.cableType,
+    strokeColor: shape.strokeColor,
+    fillColor: shape.fillColor,
+    strokeWidth: shape.strokeWidth,
+    strokeStyle: shape.strokeStyle,
+    opacity: shape.opacity,
+    rotation: shape.rotation,
+  };
+}
 
   if (nextType === "socket" || nextType === "switch") {
-    const width = shape.type === "circle" ? Math.max(36, shape.radius * 2) : Math.max(24, shape.width);
-    const height = shape.type === "circle" ? Math.max(36, shape.radius * 2) : Math.max(24, shape.height);
+  const width = shape.type === "circle" ? Math.max(36, shape.radius * 2) : Math.max(24, shape.width);
+  const height = shape.type === "circle" ? Math.max(36, shape.radius * 2) : Math.max(24, shape.height);
 
-    return {
-      id: shape.id,
-      type: nextType,
-      x: center.x,
-      y: center.y,
-      width,
-      height,
-      label: nextType === "socket" ? "Розетка" : "Выключатель",
-      groupName: shape.groupName,
-      cableType: shape.cableType,
-      strokeColor: shape.strokeColor,
-      fillColor: nextType === "socket" ? shape.fillColor || "#00e7a7" : shape.fillColor || "#ff7300",
-      strokeWidth: shape.strokeWidth,
-      strokeStyle: shape.strokeStyle,
-      opacity: shape.opacity,
-      rotation: shape.rotation,
-    };
-  }
+  return {
+    id: shape.id,
+    type: nextType,
+    x: center.x,
+    y: center.y,
+    width,
+    height,
+    label: nextType === "socket" ? "Розетка" : "Выключатель",
+    groupName: shape.groupName,
+    cableType: shape.cableType,
+    strokeColor: shape.strokeColor,
+    fillColor: nextType === "socket" ? shape.fillColor || "#00e7a7" : shape.fillColor || "#ff7300",
+    strokeWidth: shape.strokeWidth,
+    strokeStyle: shape.strokeStyle,
+    opacity: shape.opacity,
+    rotation: shape.rotation,
+  };
+}
 
   return shape;
 }
