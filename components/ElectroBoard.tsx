@@ -189,6 +189,10 @@ type HoverAnchorState = {
     y: number;
   } | null;
 };
+type AlignmentGuide = {
+  orientation: "vertical" | "horizontal";
+  worldValue: number;
+};
 
 const defaultStyle: ShapeStyle = {
   strokeColor: "#7fa7ff",
@@ -231,7 +235,8 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   const [showLibrary, setShowLibrary] = useState(false);
   const [libraryCountry, setLibraryCountry] = useState<LibraryCountry>("FR");
   const [hoverAnchorState, setHoverAnchorState] = useState<HoverAnchorState | null>(null);
-  const [canvasSize] = useState({ width: 1400, height: 900 });
+const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
+const [canvasSize] = useState({ width: 1400, height: 900 });
   const [canvasCursor, setCanvasCursor] = useState<React.CSSProperties["cursor"]>("grab");
 
   const [history, setHistory] = useState<HistoryState[]>([]);
@@ -1157,11 +1162,39 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     }
 
     setShapes((prev) => {
-      const updated = prev.map((shape) =>
-        shape.id === interaction.shapeId ? transformShape(shape, interaction, point, prev) : shape
+  let updated = prev.map((shape) =>
+    shape.id === interaction.shapeId ? transformShape(shape, interaction, point, prev) : shape
+  );
+
+  if (interaction.mode === "move") {
+    const movingShape = updated.find((shape) => shape.id === interaction.shapeId);
+
+    if (
+      movingShape &&
+      movingShape.type !== "line" &&
+      movingShape.type !== "cable"
+    ) {
+      const snapped = computeSnappedMove(
+        movingShape,
+        updated,
+        interaction.shapeId,
+        camera
       );
-      return applyAttachments(updated);
-    });
+
+      updated = updated.map((shape) =>
+        shape.id === interaction.shapeId ? snapped.shape : shape
+      );
+
+      setAlignmentGuides(snapped.guides);
+    } else {
+      setAlignmentGuides([]);
+    }
+  } else {
+    setAlignmentGuides([]);
+  }
+
+  return applyAttachments(updated);
+});
   }
 
   function handleCanvasMouseUp() {
@@ -1247,6 +1280,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     setInteraction(null);
 setPanState(null);
 clearHoverAnchors();
+setAlignmentGuides([]);
 setCanvasCursor("grab");
   }
 
@@ -1400,9 +1434,10 @@ setCanvasCursor("grab");
               onMouseMove={handleCanvasMouseMove}
               onMouseUp={handleCanvasMouseUp}
               onMouseLeave={() => {
-  handleCanvasMouseUp();
-  clearHoverAnchors();
-  setCanvasCursor("grab");
+              handleCanvasMouseUp();
+              clearHoverAnchors();
+              setAlignmentGuides([]);
+              setCanvasCursor("grab");
 }}
               onWheel={handleWheel}
             >
@@ -1473,7 +1508,8 @@ setCanvasCursor("grab");
                   />
                 ) : null}
               </g>
-              {selectedShape ? renderSelectionOverlayScreen(selectedShape, camera) : null}
+{renderAlignmentGuidesScreen(alignmentGuides, camera, canvasSize)}
+{selectedShape ? renderSelectionOverlayScreen(selectedShape, camera) : null}
             </svg>
 
             <div style={styles.zoomControls}>
@@ -2490,6 +2526,177 @@ function convertShapeType(shape: Shape, nextType: Shape["type"]): Shape {
   return shape;
 }
 
+function getShapeBounds(shape: Shape) {
+  if (shape.type === "rectangle" || shape.type === "cad") {
+    return {
+      left: shape.x,
+      right: shape.x + shape.width,
+      top: shape.y,
+      bottom: shape.y + shape.height,
+      centerX: shape.x + shape.width / 2,
+      centerY: shape.y + shape.height / 2,
+    };
+  }
+
+  if (shape.type === "circle") {
+    return {
+      left: shape.x - shape.radius,
+      right: shape.x + shape.radius,
+      top: shape.y - shape.radius,
+      bottom: shape.y + shape.radius,
+      centerX: shape.x,
+      centerY: shape.y,
+    };
+  }
+
+  if (shape.type === "socket" || shape.type === "switch") {
+    return {
+      left: shape.x - shape.width / 2,
+      right: shape.x + shape.width / 2,
+      top: shape.y - shape.height / 2,
+      bottom: shape.y + shape.height / 2,
+      centerX: shape.x,
+      centerY: shape.y,
+    };
+  }
+
+  return null;
+}
+
+function moveShapeBy(shape: Shape, dx: number, dy: number): Shape {
+  if (shape.type === "line" || shape.type === "cable") {
+    return {
+      ...shape,
+      x: shape.x + dx,
+      y: shape.y + dy,
+      x2: shape.x2 + dx,
+      y2: shape.y2 + dy,
+    };
+  }
+
+  if (shape.type === "circle") {
+    return {
+      ...shape,
+      x: shape.x + dx,
+      y: shape.y + dy,
+    };
+  }
+
+  if (
+    shape.type === "rectangle" ||
+    shape.type === "cad" ||
+    shape.type === "socket" ||
+    shape.type === "switch"
+  ) {
+    return {
+      ...shape,
+      x: shape.x + dx,
+      y: shape.y + dy,
+    };
+  }
+
+  return shape;
+}
+
+function getAlignmentCandidates(shape: Shape) {
+  const bounds = getShapeBounds(shape);
+  if (!bounds) return null;
+
+  return {
+    vertical: [
+      { key: "left", value: bounds.left },
+      { key: "centerX", value: bounds.centerX },
+      { key: "right", value: bounds.right },
+    ],
+    horizontal: [
+      { key: "top", value: bounds.top },
+      { key: "centerY", value: bounds.centerY },
+      { key: "bottom", value: bounds.bottom },
+    ],
+  };
+}
+
+function computeSnappedMove(
+  movingShape: Shape,
+  allShapes: Shape[],
+  movingId: string,
+  camera: CameraState
+): { shape: Shape; guides: AlignmentGuide[] } {
+  const movingCandidates = getAlignmentCandidates(movingShape);
+  if (!movingCandidates) {
+    return { shape: movingShape, guides: [] };
+  }
+
+  const thresholdPx = 10;
+  const thresholdWorld = thresholdPx / Math.max(camera.zoom, 0.0001);
+
+  let bestVertical: { delta: number; target: number } | null = null;
+  let bestHorizontal: { delta: number; target: number } | null = null;
+
+  for (const other of allShapes) {
+    if (other.id === movingId) continue;
+    if (other.type === "line" || other.type === "cable") continue;
+
+    const otherCandidates = getAlignmentCandidates(other);
+    if (!otherCandidates) continue;
+
+    for (const own of movingCandidates.vertical) {
+      for (const target of otherCandidates.vertical) {
+        const delta = target.value - own.value;
+        const absDelta = Math.abs(delta);
+
+        if (absDelta <= thresholdWorld) {
+          if (!bestVertical || absDelta < Math.abs(bestVertical.delta)) {
+            bestVertical = {
+              delta,
+              target: target.value,
+            };
+          }
+        }
+      }
+    }
+
+    for (const own of movingCandidates.horizontal) {
+      for (const target of otherCandidates.horizontal) {
+        const delta = target.value - own.value;
+        const absDelta = Math.abs(delta);
+
+        if (absDelta <= thresholdWorld) {
+          if (!bestHorizontal || absDelta < Math.abs(bestHorizontal.delta)) {
+            bestHorizontal = {
+              delta,
+              target: target.value,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  const dx = bestVertical ? bestVertical.delta : 0;
+  const dy = bestHorizontal ? bestHorizontal.delta : 0;
+
+  const snappedShape = moveShapeBy(movingShape, dx, dy);
+
+  const guides: AlignmentGuide[] = [];
+  if (bestVertical) {
+    guides.push({
+      orientation: "vertical",
+      worldValue: bestVertical.target,
+    });
+  }
+  if (bestHorizontal) {
+    guides.push({
+      orientation: "horizontal",
+      worldValue: bestHorizontal.target,
+    });
+  }
+
+  return {
+    shape: snappedShape,
+    guides,
+  };
+}
 function getShapeCenter(shape: Shape) {
   if (shape.type === "rectangle" || shape.type === "cad") {
     return { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 };
@@ -3068,6 +3275,51 @@ function renderSelectionOverlayScreen(shape: Shape, camera: CameraState) {
   }
 
   return null;
+}
+function renderAlignmentGuidesScreen(
+  guides: AlignmentGuide[],
+  camera: CameraState,
+  canvasSize: { width: number; height: number }
+) {
+  if (guides.length === 0) return null;
+
+  return (
+    <g pointerEvents="none">
+      {guides.map((guide, index) => {
+        if (guide.orientation === "vertical") {
+          const p = projectWorldToScreen(guide.worldValue, 0, camera);
+          return (
+            <line
+              key={`guide-v-${index}`}
+              x1={p.x}
+              y1={0}
+              x2={p.x}
+              y2={canvasSize.height}
+              stroke="#00e7a7"
+              strokeWidth="1.5"
+              strokeDasharray="6 6"
+              opacity="0.95"
+            />
+          );
+        }
+
+        const p = projectWorldToScreen(0, guide.worldValue, camera);
+        return (
+          <line
+            key={`guide-h-${index}`}
+            x1={0}
+            y1={p.y}
+            x2={canvasSize.width}
+            y2={p.y}
+            stroke="#00e7a7"
+            strokeWidth="1.5"
+            strokeDasharray="6 6"
+            opacity="0.95"
+          />
+        );
+      })}
+    </g>
+  );
 }
 function worldToScreenPoint(
   worldX: number,
