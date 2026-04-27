@@ -2321,7 +2321,14 @@ function renderCadPrimitive(
 
   return null;
 }
+  function renderCadPrimitive(
+  primitive: CadPrimitive,
+  key: string,
+  visible: boolean
+) {
   if (!visible) return null;
+
+  const boostedStrokeWidth = Math.max((primitive.strokeWidth || 1) * 1.8, 2.2);
 
   if (primitive.type === "line") {
     return (
@@ -2331,8 +2338,11 @@ function renderCadPrimitive(
         y1={primitive.y1}
         x2={primitive.x2}
         y2={primitive.y2}
-        stroke={primitive.stroke || "#dce7ff"}
-        strokeWidth={primitive.strokeWidth || 1}
+        stroke={primitive.stroke || "#e6eeff"}
+        strokeWidth={boostedStrokeWidth}
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+        shapeRendering="geometricPrecision"
       />
     );
   }
@@ -2344,9 +2354,12 @@ function renderCadPrimitive(
         key={key}
         points={points}
         fill={primitive.closed ? primitive.fill || "none" : "none"}
-        stroke={primitive.stroke || "#dce7ff"}
-        strokeWidth={primitive.strokeWidth || 1}
-        {...(primitive.closed ? { polygonRendering: "geometricPrecision" } : {})}
+        stroke={primitive.stroke || "#e6eeff"}
+        strokeWidth={boostedStrokeWidth}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+        shapeRendering="geometricPrecision"
       />
     );
   }
@@ -2359,8 +2372,10 @@ function renderCadPrimitive(
         cy={primitive.cy}
         r={primitive.r}
         fill={primitive.fill || "none"}
-        stroke={primitive.stroke || "#dce7ff"}
-        strokeWidth={primitive.strokeWidth || 1}
+        stroke={primitive.stroke || "#e6eeff"}
+        strokeWidth={boostedStrokeWidth}
+        vectorEffect="non-scaling-stroke"
+        shapeRendering="geometricPrecision"
       />
     );
   }
@@ -2372,7 +2387,7 @@ function renderCadPrimitive(
         x={primitive.x}
         y={primitive.y}
         fill={primitive.fill || "#f2f6ff"}
-        fontSize={primitive.size || 12}
+        fontSize={Math.max(primitive.size || 12, 13)}
       >
         {primitive.text}
       </text>
@@ -2381,7 +2396,6 @@ function renderCadPrimitive(
 
   return null;
 }
-
 function renderSelectionOverlay(shape: Shape) {
   if (shape.type === "line" || shape.type === "cable") {
     const midX = (shape.x + shape.x2) / 2;
