@@ -214,6 +214,9 @@ const WORLD_BOUNDS = {
 
 const RESIZE_SENSITIVITY = 0.65;
 const ZOOM_STEP = 1.08;
+const ROTATION_SNAP_STEP = 45;
+const ROTATION_SNAP_THRESHOLD = 6;
+const RESIZE_GUIDE_THRESHOLD_PX = 10;
 
 export default function ElectroBoard({ projectId }: { projectId: string }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -1198,16 +1201,16 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     shape.id === interaction.shapeId ? transformShape(shape, interaction, point, prev) : shape
   );
 
-  if (interaction.mode === "move") {
-    const movingShape = updated.find((shape) => shape.id === interaction.shapeId);
+  const activeShape = updated.find((shape) => shape.id === interaction.shapeId) || null;
 
+  if (interaction.mode === "move") {
     if (
-      movingShape &&
-      movingShape.type !== "line" &&
-      movingShape.type !== "cable"
+      activeShape &&
+      activeShape.type !== "line" &&
+      activeShape.type !== "cable"
     ) {
       const snapped = computeSnappedMove(
-        movingShape,
+        activeShape,
         updated,
         interaction.shapeId,
         camera
@@ -1221,6 +1224,22 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     } else {
       setAlignmentGuides([]);
     }
+  } else if (
+    activeShape &&
+    (isCornerResizeHandle(interaction.mode) || isSideResizeHandle(interaction.mode))
+  ) {
+    const snapped = computeSnappedResize(
+      activeShape,
+      updated,
+      interaction,
+      camera
+    );
+
+    updated = updated.map((shape) =>
+      shape.id === interaction.shapeId ? snapped.shape : shape
+    );
+
+    setAlignmentGuides(snapped.guides);
   } else {
     setAlignmentGuides([]);
   }
@@ -2734,6 +2753,283 @@ function computeSnappedMove(
     guides,
   };
 }
+
+function getResizeRelevantKeys(
+  mode: HandleType,
+  resizeFromCenter: boolean
+): { vertical: string[]; horizontal: string[] } {
+  const vertical: string[] = [];
+  const horizontal: string[] = [];
+
+  if (mode === "resize-e") vertical.push(resizeFromCenter ? "left" : "right");
+  if (mode === "resize-w") vertical.push("left");
+  if (mode === "resize-n") horizontal.push("top");
+  if (mode === "resize-s") horizontal.push(resizeFromCenter ? "top" : "bottom");
+
+  if (mode === "resize-ne") {
+    vertical.push("right");
+    horizontal.push("top");
+  }
+  if (mode === "resize-nw") {
+    vertical.push("left");
+    horizontal.push("top");
+  }
+  if (mode === "resize-se") {
+    vertical.push(resizeFromCenter ? "left" : "right");
+    horizontal.push(resizeFromCenter ? "top" : "bottom");
+  }
+  if (mode === "resize-sw") {
+    vertical.push("left");
+    horizontal.push(resizeFromCenter ? "top" : "bottom");
+  }
+
+  if (resizeFromCenter) {
+    if (mode === "resize-e" || mode === "resize-w") vertical.push("right");
+    if (mode === "resize-n" || mode === "resize-s") horizontal.push("bottom");
+    if (mode === "resize-ne" || mode === "resize-nw") horizontal.push("bottom");
+    if (mode === "resize-se" || mode === "resize-sw") horizontal.push("bottom");
+    if (mode === "resize-ne" || mode === "resize-se") vertical.push("left");
+    if (mode === "resize-nw" || mode === "resize-sw") vertical.push("right");
+  }
+
+  return {
+    vertical: [...new Set(vertical)],
+    horizontal: [...new Set(horizontal)],
+  };
+}
+
+function getResizableBounds(shape: Shape) {
+  if (shape.type === "rectangle" || shape.type === "cad") {
+    return {
+      left: shape.x,
+      right: shape.x + shape.width,
+      top: shape.y,
+      bottom: shape.y + shape.height,
+    };
+  }
+
+  if (shape.type === "socket" || shape.type === "switch") {
+    return {
+      left: shape.x - shape.width / 2,
+      right: shape.x + shape.width / 2,
+      top: shape.y - shape.height / 2,
+      bottom: shape.y + shape.height / 2,
+    };
+  }
+
+  return null;
+}
+
+function buildShapeFromBounds(
+  shape: Shape,
+  bounds: { left: number; right: number; top: number; bottom: number }
+): Shape {
+  const width = Math.max(16, bounds.right - bounds.left);
+  const height = Math.max(16, bounds.bottom - bounds.top);
+
+  if (shape.type === "rectangle" || shape.type === "cad") {
+    return {
+      ...shape,
+      x: bounds.left,
+      y: bounds.top,
+      width,
+      height,
+    };
+  }
+
+  if (shape.type === "socket" || shape.type === "switch") {
+    return {
+      ...shape,
+      x: bounds.left + width / 2,
+      y: bounds.top + height / 2,
+      width,
+      height,
+    };
+  }
+
+  return shape;
+}
+
+function enforceMinBounds(
+  bounds: { left: number; right: number; top: number; bottom: number },
+  ownKey: string,
+  resizeFromCenter: boolean
+) {
+  const minSize = 16;
+
+  if (bounds.right - bounds.left < minSize) {
+    if (resizeFromCenter) {
+      const cx = (bounds.left + bounds.right) / 2;
+      bounds.left = cx - minSize / 2;
+      bounds.right = cx + minSize / 2;
+    } else if (ownKey === "left") {
+      bounds.left = bounds.right - minSize;
+    } else {
+      bounds.right = bounds.left + minSize;
+    }
+  }
+
+  if (bounds.bottom - bounds.top < minSize) {
+    if (resizeFromCenter) {
+      const cy = (bounds.top + bounds.bottom) / 2;
+      bounds.top = cy - minSize / 2;
+      bounds.bottom = cy + minSize / 2;
+    } else if (ownKey === "top") {
+      bounds.top = bounds.bottom - minSize;
+    } else {
+      bounds.bottom = bounds.top + minSize;
+    }
+  }
+}
+
+function applyResizeSnapDelta(
+  shape: Shape,
+  orientation: "vertical" | "horizontal",
+  ownKey: string,
+  delta: number,
+  resizeFromCenter: boolean
+): Shape {
+  const bounds = getResizableBounds(shape);
+  if (!bounds) return shape;
+
+  if (orientation === "vertical") {
+    if (ownKey === "right") {
+      bounds.right += delta;
+      if (resizeFromCenter) bounds.left -= delta;
+    }
+
+    if (ownKey === "left") {
+      bounds.left += delta;
+      if (resizeFromCenter) bounds.right -= delta;
+    }
+  } else {
+    if (ownKey === "bottom") {
+      bounds.bottom += delta;
+      if (resizeFromCenter) bounds.top -= delta;
+    }
+
+    if (ownKey === "top") {
+      bounds.top += delta;
+      if (resizeFromCenter) bounds.bottom -= delta;
+    }
+  }
+
+  enforceMinBounds(bounds, ownKey, resizeFromCenter);
+  return buildShapeFromBounds(shape, bounds);
+}
+
+function computeSnappedResize(
+  resizingShape: Shape,
+  allShapes: Shape[],
+  interaction: InteractionState,
+  camera: CameraState
+): { shape: Shape; guides: AlignmentGuide[] } {
+  const resizingCandidates = getAlignmentCandidates(resizingShape);
+  if (!resizingCandidates) {
+    return { shape: resizingShape, guides: [] };
+  }
+
+  const relevantKeys = getResizeRelevantKeys(
+    interaction.mode,
+    Boolean(interaction.resizeFromCenter)
+  );
+
+  if (relevantKeys.vertical.length === 0 && relevantKeys.horizontal.length === 0) {
+    return { shape: resizingShape, guides: [] };
+  }
+
+  const thresholdWorld = RESIZE_GUIDE_THRESHOLD_PX / Math.max(camera.zoom, 0.0001);
+
+  let bestVertical: { delta: number; target: number; ownKey: string } | null = null;
+  let bestHorizontal: { delta: number; target: number; ownKey: string } | null = null;
+
+  for (const other of allShapes) {
+    if (other.id === interaction.shapeId) continue;
+    if (other.type === "line" || other.type === "cable") continue;
+
+    const otherCandidates = getAlignmentCandidates(other);
+    if (!otherCandidates) continue;
+
+    for (const own of resizingCandidates.vertical.filter((item) =>
+      relevantKeys.vertical.includes(item.key)
+    )) {
+      for (const target of otherCandidates.vertical) {
+        const delta = target.value - own.value;
+        const absDelta = Math.abs(delta);
+
+        if (absDelta <= thresholdWorld) {
+          if (!bestVertical || absDelta < Math.abs(bestVertical.delta)) {
+            bestVertical = {
+              delta,
+              target: target.value,
+              ownKey: own.key,
+            };
+          }
+        }
+      }
+    }
+
+    for (const own of resizingCandidates.horizontal.filter((item) =>
+      relevantKeys.horizontal.includes(item.key)
+    )) {
+      for (const target of otherCandidates.horizontal) {
+        const delta = target.value - own.value;
+        const absDelta = Math.abs(delta);
+
+        if (absDelta <= thresholdWorld) {
+          if (!bestHorizontal || absDelta < Math.abs(bestHorizontal.delta)) {
+            bestHorizontal = {
+              delta,
+              target: target.value,
+              ownKey: own.key,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  let snappedShape = resizingShape;
+  if (bestVertical) {
+    snappedShape = applyResizeSnapDelta(
+      snappedShape,
+      "vertical",
+      bestVertical.ownKey,
+      bestVertical.delta,
+      Boolean(interaction.resizeFromCenter)
+    );
+  }
+
+  if (bestHorizontal) {
+    snappedShape = applyResizeSnapDelta(
+      snappedShape,
+      "horizontal",
+      bestHorizontal.ownKey,
+      bestHorizontal.delta,
+      Boolean(interaction.resizeFromCenter)
+    );
+  }
+
+  const guides: AlignmentGuide[] = [];
+  if (bestVertical) {
+    guides.push({
+      orientation: "vertical",
+      worldValue: bestVertical.target,
+    });
+  }
+  if (bestHorizontal) {
+    guides.push({
+      orientation: "horizontal",
+      worldValue: bestHorizontal.target,
+    });
+  }
+
+  return {
+    shape: snappedShape,
+    guides,
+  };
+}
+
 function getShapeCenter(shape: Shape) {
   if (shape.type === "rectangle" || shape.type === "cad") {
     return { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 };
@@ -3025,19 +3321,22 @@ function transformShape(
       const s = initial as RectangleShape;
       const cx = s.x + s.width / 2;
       const cy = s.y + s.height / 2;
-      return { ...shape, rotation: angleDeg(cx, cy, point.x, point.y) + 90 };
+      const nextRotation = snapRotationAngle(angleDeg(cx, cy, point.x, point.y) + 90);
+      return { ...shape, rotation: nextRotation };
     }
 
     if (shape.type === "cad") {
       const s = initial as CadShape;
       const cx = s.x + s.width / 2;
       const cy = s.y + s.height / 2;
-      return { ...shape, rotation: angleDeg(cx, cy, point.x, point.y) + 90 };
+      const nextRotation = snapRotationAngle(angleDeg(cx, cy, point.x, point.y) + 90);
+      return { ...shape, rotation: nextRotation };
     }
 
     if (shape.type === "socket" || shape.type === "switch") {
       const s = initial as SocketShape | SwitchShape;
-      return { ...shape, rotation: angleDeg(s.x, s.y, point.x, point.y) + 90 };
+      const nextRotation = snapRotationAngle(angleDeg(s.x, s.y, point.x, point.y) + 90);
+      return { ...shape, rotation: nextRotation };
     }
   }
 
@@ -3539,6 +3838,20 @@ function rotatePoint(px: number, py: number, cx: number, cy: number, angleDegVal
     x: cx + dx * cos - dy * sin,
     y: cy + dx * sin + dy * cos,
   };
+}
+
+
+function snapRotationAngle(angle: number) {
+  const normalized = ((angle % 360) + 360) % 360;
+  const nearest = Math.round(normalized / ROTATION_SNAP_STEP) * ROTATION_SNAP_STEP;
+  const diff = Math.abs(nearest - normalized);
+  const wrappedDiff = Math.min(diff, 360 - diff);
+
+  if (wrappedDiff <= ROTATION_SNAP_THRESHOLD) {
+    return nearest % 360;
+  }
+
+  return angle;
 }
 
 function angleDeg(cx: number, cy: number, px: number, py: number) {
