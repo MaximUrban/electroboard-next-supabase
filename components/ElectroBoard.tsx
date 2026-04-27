@@ -118,6 +118,13 @@ type InteractionState = {
   initialShape: Shape;
 };
 
+type HistoryState = {
+  shapes: Shape[];
+  calibrationPoints: CalibrationPoint[];
+  metersPerPixel: number;
+  projectName: string;
+};
+
 const defaultStyle: ShapeStyle = {
   strokeColor: "#7fa7ff",
   fillColor: "#4b70ff",
@@ -129,6 +136,7 @@ const defaultStyle: ShapeStyle = {
 
 export default function ElectroBoard({ projectId }: { projectId: string }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const altDragCreatedRef = useRef(false);
 
   const [projectName, setProjectName] = useState("Project");
   const [tool, setTool] = useState<Tool>("select");
@@ -145,6 +153,9 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [canvasSize] = useState({ width: 1400, height: 900 });
 
+  const [history, setHistory] = useState<HistoryState[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+
   const selectedShape = useMemo(
     () => shapes.find((s) => s.id === selectedId) || null,
     [shapes, selectedId]
@@ -155,6 +166,16 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     [shapes, metersPerPixel]
   );
 
+  const snapshot = useMemo<HistoryState>(
+    () => ({
+      shapes,
+      calibrationPoints,
+      metersPerPixel,
+      projectName,
+    }),
+    [shapes, calibrationPoints, metersPerPixel, projectName]
+  );
+
   useEffect(() => {
     const saved = getProjectById(projectId);
 
@@ -163,6 +184,23 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       setShapes(saved.data?.shapes || []);
       setMetersPerPixel(saved.data?.metersPerPixel || 0);
       setCalibrationPoints(saved.data?.calibrationPoints || []);
+      const initial: HistoryState = {
+        shapes: saved.data?.shapes || [],
+        metersPerPixel: saved.data?.metersPerPixel || 0,
+        calibrationPoints: saved.data?.calibrationPoints || [],
+        projectName: saved.name || "Project",
+      };
+      setHistory([initial]);
+      setHistoryIndex(0);
+    } else {
+      const initial: HistoryState = {
+        shapes: [],
+        metersPerPixel: 0,
+        calibrationPoints: [],
+        projectName: "Project",
+      };
+      setHistory([initial]);
+      setHistoryIndex(0);
     }
 
     setLoaded(true);
@@ -189,6 +227,109 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [loaded, projectId, projectName, shapes, metersPerPixel, calibrationPoints]);
 
+  useEffect(() => {
+    if (!loaded) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
+      const isTyping =
+        tag === "input" || tag === "textarea" || (e.target as HTMLElement | null)?.isContentEditable;
+
+      const mod = e.ctrlKey || e.metaKey;
+
+      if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+
+      if ((mod && e.shiftKey && e.key.toLowerCase() === "z") || (mod && e.key.toLowerCase() === "y")) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+
+      if (isTyping) return;
+      if (!selectedId) {
+        if (e.key === "Delete" || e.key === "Backspace") {
+          e.preventDefault();
+        }
+        return;
+      }
+
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        deleteSelected();
+        return;
+      }
+
+      const step = e.shiftKey ? 10 : 1;
+
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        nudgeSelected(0, -step);
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        nudgeSelected(0, step);
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        nudgeSelected(-step, 0);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        nudgeSelected(step, 0);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [loaded, selectedId, historyIndex, history]);
+
+  function pushHistory(next: HistoryState) {
+    setHistory((prev) => {
+      const trimmed = prev.slice(0, historyIndex + 1);
+      const last = trimmed[trimmed.length - 1];
+
+      if (last && JSON.stringify(last) === JSON.stringify(next)) {
+        return prev;
+      }
+
+      const updated = [...trimmed, cloneDeep(next)];
+      if (updated.length > 100) updated.shift();
+      const newIndex = updated.length - 1;
+      setHistoryIndex(newIndex);
+      return updated;
+    });
+  }
+
+  function undo() {
+    setHistoryIndex((prevIndex) => {
+      const nextIndex = Math.max(0, prevIndex - 1);
+      const state = history[nextIndex];
+      if (state) applyHistoryState(state);
+      return nextIndex;
+    });
+  }
+
+  function redo() {
+    setHistoryIndex((prevIndex) => {
+      const nextIndex = Math.min(history.length - 1, prevIndex + 1);
+      const state = history[nextIndex];
+      if (state) applyHistoryState(state);
+      return nextIndex;
+    });
+  }
+
+  function applyHistoryState(state: HistoryState) {
+    setShapes(cloneDeep(state.shapes));
+    setCalibrationPoints(cloneDeep(state.calibrationPoints));
+    setMetersPerPixel(state.metersPerPixel);
+    setProjectName(state.projectName);
+    setSelectedId(null);
+    setInteraction(null);
+    setDraftLine(null);
+    setStatus("История применена");
+  }
+
   function persistProject(showPulse = true) {
     const existing = getProjectById(projectId);
     const now = Date.now();
@@ -214,6 +355,15 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     }
   }
 
+  function commitHistory(nextShapes?: Shape[], nextCalibrationPoints?: CalibrationPoint[], nextMetersPerPixel?: number, nextProjectName?: string) {
+    pushHistory({
+      shapes: cloneDeep(nextShapes ?? shapes),
+      calibrationPoints: cloneDeep(nextCalibrationPoints ?? calibrationPoints),
+      metersPerPixel: nextMetersPerPixel ?? metersPerPixel,
+      projectName: nextProjectName ?? projectName,
+    });
+  }
+
   function getSvgPoint(clientX: number, clientY: number) {
     const svg = svgRef.current;
     if (!svg) return { x: 0, y: 0 };
@@ -225,11 +375,73 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   }
 
   function setShapePatch(id: string, patch: Partial<Shape>) {
-    setShapes((prev) => applyAttachments(prev.map((s) => (s.id === id ? ({ ...s, ...patch } as Shape) : s))));
+    setShapes((prev) => {
+      const next = applyAttachments(prev.map((s) => (s.id === id ? ({ ...s, ...patch } as Shape) : s)));
+      window.setTimeout(() => commitHistory(next), 0);
+      return next;
+    });
+  }
+
+  function nudgeSelected(dx: number, dy: number) {
+    if (!selectedId) return;
+
+    setShapes((prev) => {
+      const next = applyAttachments(
+        prev.map((shape) => {
+          if (shape.id !== selectedId) return shape;
+
+          if (shape.type === "line" || shape.type === "cable") {
+            return {
+              ...shape,
+              x: shape.x + dx,
+              y: shape.y + dy,
+              x2: shape.x2 + dx,
+              y2: shape.y2 + dy,
+            };
+          }
+
+          if (shape.type === "circle") {
+            return { ...shape, x: shape.x + dx, y: shape.y + dy };
+          }
+
+          return { ...shape, x: shape.x + dx, y: shape.y + dy } as Shape;
+        })
+      );
+
+      window.setTimeout(() => commitHistory(next), 0);
+      return next;
+    });
+  }
+
+  function duplicateShapeWithoutAttachments(shape: Shape): Shape {
+    const copy = cloneDeep(shape);
+    copy.id = crypto.randomUUID();
+    copy.label = shape.label;
+
+    if (copy.type === "line" || copy.type === "cable") {
+      copy.startAttachment = undefined;
+      copy.endAttachment = undefined;
+      copy.x += 20;
+      copy.y += 20;
+      copy.x2 += 20;
+      copy.y2 += 20;
+      return copy;
+    }
+
+    if (copy.type === "circle") {
+      copy.x += 20;
+      copy.y += 20;
+      return copy;
+    }
+
+    copy.x += 20;
+    copy.y += 20;
+    return copy;
   }
 
   function handleCanvasMouseDown(e: React.MouseEvent<SVGSVGElement>) {
     const point = getSvgPoint(e.clientX, e.clientY);
+    altDragCreatedRef.current = false;
 
     if (tool === "calibrate") {
       const next = [...calibrationPoints, point].slice(-2);
@@ -239,9 +451,13 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
         const px = distance(next[0].x, next[0].y, next[1].x, next[1].y);
         const meters = Number(calibrationDistanceMeters);
         if (px > 0 && meters > 0) {
-          setMetersPerPixel(meters / px);
+          const nextMeters = meters / px;
+          setMetersPerPixel(nextMeters);
           setStatus(`Масштаб задан: ${meters.toFixed(2)} м на ${px.toFixed(0)} px`);
+          window.setTimeout(() => commitHistory(shapes, next, nextMeters), 0);
         }
+      } else {
+        window.setTimeout(() => commitHistory(shapes, next), 0);
       }
       return;
     }
@@ -254,7 +470,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
             mode: handle,
             shapeId: selectedShape.id,
             startPointer: point,
-            initialShape: cloneShape(selectedShape),
+            initialShape: cloneDeep(selectedShape),
           });
           return;
         }
@@ -262,12 +478,30 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
       const hit = [...shapes].reverse().find((shape) => isPointOnShape(point.x, point.y, shape));
       if (hit) {
+        if (e.altKey) {
+          const duplicated = duplicateShapeWithoutAttachments(hit);
+          setShapes((prev) => {
+            const next = [...prev, duplicated];
+            window.setTimeout(() => commitHistory(next), 0);
+            return next;
+          });
+          setSelectedId(duplicated.id);
+          setInteraction({
+            mode: "move",
+            shapeId: duplicated.id,
+            startPointer: point,
+            initialShape: cloneDeep(duplicated),
+          });
+          altDragCreatedRef.current = true;
+          return;
+        }
+
         setSelectedId(hit.id);
         setInteraction({
           mode: "move",
           shapeId: hit.id,
           startPointer: point,
-          initialShape: cloneShape(hit),
+          initialShape: cloneDeep(hit),
         });
         return;
       }
@@ -288,7 +522,11 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
         label: "Прямоугольник",
         ...defaultStyle,
       };
-      setShapes((prev) => [...prev, shape]);
+      setShapes((prev) => {
+        const next = [...prev, shape];
+        window.setTimeout(() => commitHistory(next), 0);
+        return next;
+      });
       setSelectedId(shape.id);
       setTool("select");
       return;
@@ -304,7 +542,11 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
         label: "Окружность",
         ...defaultStyle,
       };
-      setShapes((prev) => [...prev, shape]);
+      setShapes((prev) => {
+        const next = [...prev, shape];
+        window.setTimeout(() => commitHistory(next), 0);
+        return next;
+      });
       setSelectedId(shape.id);
       setTool("select");
       return;
@@ -323,7 +565,11 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
         ...defaultStyle,
         fillColor: "#00e7a7",
       };
-      setShapes((prev) => [...prev, shape]);
+      setShapes((prev) => {
+        const next = [...prev, shape];
+        window.setTimeout(() => commitHistory(next), 0);
+        return next;
+      });
       setSelectedId(shape.id);
       setTool("select");
       return;
@@ -342,7 +588,11 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
         ...defaultStyle,
         fillColor: "#ff7300",
       };
-      setShapes((prev) => [...prev, shape]);
+      setShapes((prev) => {
+        const next = [...prev, shape];
+        window.setTimeout(() => commitHistory(next), 0);
+        return next;
+      });
       setSelectedId(shape.id);
       setTool("select");
       return;
@@ -391,7 +641,11 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
   function handleCanvasMouseUp() {
     if (draftLine) {
-      setShapes((prev) => [...prev, draftLine]);
+      setShapes((prev) => {
+        const next = [...prev, draftLine];
+        window.setTimeout(() => commitHistory(next), 0);
+        return next;
+      });
       setDraftLine(null);
       setTool("select");
       return;
@@ -431,10 +685,16 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
               };
         });
 
-        return applyAttachments(updated);
+        const next = applyAttachments(updated);
+        window.setTimeout(() => commitHistory(next), 0);
+        return next;
       });
-    } else {
-      setShapes((prev) => applyAttachments(prev));
+    } else if (interaction) {
+      setShapes((prev) => {
+        const next = applyAttachments(prev);
+        window.setTimeout(() => commitHistory(next), 0);
+        return next;
+      });
     }
 
     setInteraction(null);
@@ -442,7 +702,11 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
   function deleteSelected() {
     if (!selectedId) return;
-    setShapes((prev) => prev.filter((s) => s.id !== selectedId));
+    setShapes((prev) => {
+      const next = prev.filter((s) => s.id !== selectedId);
+      window.setTimeout(() => commitHistory(next), 0);
+      return next;
+    });
     setSelectedId(null);
   }
 
@@ -453,6 +717,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     setCalibrationPoints([]);
     setInteraction(null);
     setStatus("Холст очищен");
+    window.setTimeout(() => commitHistory([], [], 0), 0);
   }
 
   return (
@@ -465,7 +730,11 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
           <input
             value={projectName}
-            onChange={(e) => setProjectName(e.target.value)}
+            onChange={(e) => {
+              const value = e.target.value;
+              setProjectName(value);
+              window.setTimeout(() => commitHistory(shapes, calibrationPoints, metersPerPixel, value), 0);
+            }}
             style={styles.projectInput}
           />
         </div>
@@ -479,6 +748,8 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
           <button style={tool === "socket" ? styles.btnActive : styles.btn} onClick={() => setTool("socket")}>Розетка</button>
           <button style={tool === "switch" ? styles.btnActive : styles.btn} onClick={() => setTool("switch")}>Выключатель</button>
           <button style={tool === "calibrate" ? styles.btnActive : styles.btn} onClick={() => setTool("calibrate")}>Масштаб</button>
+          <button style={styles.btn} onClick={undo}>Undo</button>
+          <button style={styles.btn} onClick={redo}>Redo</button>
         </div>
       </div>
 
@@ -679,6 +950,16 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
                     Длина: {lineLengthMeters(selectedShape, metersPerPixel).toFixed(2)} м
                   </div>
                 )}
+
+                <div style={styles.hint}>
+                  Горячие клавиши:
+                  <br />Delete / Backspace — удалить
+                  <br />Ctrl/Cmd + Z — назад
+                  <br />Ctrl/Cmd + Shift + Z или Ctrl/Cmd + Y — вперед
+                  <br />Стрелки — сдвиг 1px
+                  <br />Shift + стрелки — сдвиг 10px
+                  <br />Alt + drag — дублировать
+                </div>
 
                 <button style={styles.deleteBtn} onClick={deleteSelected}>
                   Удалить объект
@@ -958,7 +1239,6 @@ function rotatePoint(px: number, py: number, cx: number, cy: number, angleDegVal
   const angle = (angleDegValue * Math.PI) / 180;
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
-
   const dx = px - cx;
   const dy = py - cy;
 
@@ -1019,7 +1299,6 @@ function getShapeAnchors(shape: Shape): AnchorPoint[] {
   if (shape.type === "rectangle") {
     const cx = shape.x + shape.width / 2;
     const cy = shape.y + shape.height / 2;
-
     const raw = [
       { id: "center", x: cx, y: cy },
       { id: "top", x: shape.x + shape.width / 2, y: shape.y },
@@ -1036,7 +1315,6 @@ function getShapeAnchors(shape: Shape): AnchorPoint[] {
   if (shape.type === "socket" || shape.type === "switch") {
     const cx = shape.x;
     const cy = shape.y;
-
     const raw = [
       { id: "center", x: shape.x, y: shape.y },
       { id: "top", x: shape.x, y: shape.y - shape.height / 2 },
@@ -1194,8 +1472,8 @@ function safeColor(value: string) {
   return "#4b70ff";
 }
 
-function cloneShape<T extends Shape>(shape: T): T {
-  return JSON.parse(JSON.stringify(shape));
+function cloneDeep<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value));
 }
 
 const styles: Record<string, React.CSSProperties> = {
