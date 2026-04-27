@@ -3259,143 +3259,135 @@ function getSquareHandleDistance(
 ) {
   return distance(screenPoint.x, screenPoint.y, target.x, target.y);
 }
-
 function hitTestHandleScreen(
-  screenPoint: { x: number; y: number },
-  shape: Shape,
-  camera: CameraState
-): HandleType | null {
-  const cornerSizePx = 18;
-  const sideSizePx = 16;
-  const rotateSizePx = 18;
-  const lineEndSizePx = 18;
-  const lineMidSizePx = 16;
-  const circleHandleSizePx = 18;
 
-  const worldToScreen = (worldX: number, worldY: number) =>
-    projectWorldToScreen(worldX, worldY, camera);
+  screenPoint: { x: number; y: number },
+
+  shape: Shape,
+
+  camera: CameraState
+
+): HandleType | null {
+
+  const cornerSize = 16;
+
+  const sideSize = 14;
+
+  const rotateSize = 16;
+
+  const lineEndSize = 16;
+
+  const lineMidSize = 14;
+
+  const isInsideSquare = (
+
+    worldX: number,
+
+    worldY: number,
+
+    size: number
+
+  ) => {
+
+    const p = projectWorldToScreen(worldX, worldY, camera);
+
+    const half = size / 2;
+
+    return (
+
+      screenPoint.x >= p.x - half &&
+
+      screenPoint.x <= p.x + half &&
+
+      screenPoint.y >= p.y - half &&
+
+      screenPoint.y <= p.y + half
+
+    );
+
+  };
 
   if (shape.type === "line" || shape.type === "cable") {
-    const start = worldToScreen(shape.x, shape.y);
-    const end = worldToScreen(shape.x2, shape.y2);
-    const mid = worldToScreen((shape.x + shape.x2) / 2, (shape.y + shape.y2) / 2);
 
-    const candidates: Array<{
-      type: HandleType;
-      point: { x: number; y: number };
-      size: number;
-    }> = [
-      { type: "line-start", point: start, size: lineEndSizePx },
-      { type: "line-end", point: end, size: lineEndSizePx },
-      { type: "move", point: mid, size: lineMidSizePx },
-    ];
+    const midX = (shape.x + shape.x2) / 2;
 
-    const nearest = candidates
-      .filter((candidate) =>
-        isScreenPointInsideCenteredSquare(screenPoint, candidate.point, candidate.size)
-      )
-      .sort(
-        (a, b) =>
-          getSquareHandleDistance(screenPoint, a.point) -
-          getSquareHandleDistance(screenPoint, b.point)
-      )[0];
+    const midY = (shape.y + shape.y2) / 2;
 
-    return nearest ? nearest.type : null;
+    if (isInsideSquare(shape.x, shape.y, lineEndSize)) return "line-start";
+
+    if (isInsideSquare(shape.x2, shape.y2, lineEndSize)) return "line-end";
+
+    if (isInsideSquare(midX, midY, lineMidSize)) return "move";
+
+    return null;
+
   }
 
   if (shape.type === "circle") {
-    const handle = worldToScreen(shape.x + shape.radius, shape.y);
 
-    if (isScreenPointInsideCenteredSquare(screenPoint, handle, circleHandleSizePx)) {
+    if (isInsideSquare(shape.x + shape.radius, shape.y, cornerSize)) {
+
       return "resize-circle";
+
     }
 
     return null;
+
   }
 
   if (
+
     shape.type === "rectangle" ||
+
     shape.type === "socket" ||
+
     shape.type === "switch" ||
+
     shape.type === "cad"
+
   ) {
+
     const geometry = getSelectionGeometry(shape);
 
-    const rotateHandle = worldToScreen(geometry.rotateHandle.x, geometry.rotateHandle.y);
-    if (isScreenPointInsideCenteredSquare(screenPoint, rotateHandle, rotateSizePx)) {
+    if (
+
+      isInsideSquare(
+
+        geometry.rotateHandle.x,
+
+        geometry.rotateHandle.y,
+
+        rotateSize
+
+      )
+
+    ) {
+
       return "rotate";
+
     }
 
-    const cornerCandidates: Array<{ type: HandleType; point: { x: number; y: number } }> = [
-      {
-        type: "resize-nw",
-        point: worldToScreen(geometry.corners.nw.x, geometry.corners.nw.y),
-      },
-      {
-        type: "resize-ne",
-        point: worldToScreen(geometry.corners.ne.x, geometry.corners.ne.y),
-      },
-      {
-        type: "resize-se",
-        point: worldToScreen(geometry.corners.se.x, geometry.corners.se.y),
-      },
-      {
-        type: "resize-sw",
-        point: worldToScreen(geometry.corners.sw.x, geometry.corners.sw.y),
-      },
-    ];
+    if (isInsideSquare(geometry.corners.nw.x, geometry.corners.nw.y, cornerSize)) return "resize-nw";
 
-    const nearestCorner = cornerCandidates
-      .filter((candidate) =>
-        isScreenPointInsideCenteredSquare(screenPoint, candidate.point, cornerSizePx)
-      )
-      .sort(
-        (a, b) =>
-          getSquareHandleDistance(screenPoint, a.point) -
-          getSquareHandleDistance(screenPoint, b.point)
-      )[0];
+    if (isInsideSquare(geometry.corners.ne.x, geometry.corners.ne.y, cornerSize)) return "resize-ne";
 
-    if (nearestCorner) {
-      return nearestCorner.type;
-    }
+    if (isInsideSquare(geometry.corners.se.x, geometry.corners.se.y, cornerSize)) return "resize-se";
 
-    const sideCandidates: Array<{ type: HandleType; point: { x: number; y: number } }> = [
-      {
-        type: "resize-n",
-        point: worldToScreen(geometry.sides.n.x, geometry.sides.n.y),
-      },
-      {
-        type: "resize-e",
-        point: worldToScreen(geometry.sides.e.x, geometry.sides.e.y),
-      },
-      {
-        type: "resize-s",
-        point: worldToScreen(geometry.sides.s.x, geometry.sides.s.y),
-      },
-      {
-        type: "resize-w",
-        point: worldToScreen(geometry.sides.w.x, geometry.sides.w.y),
-      },
-    ];
+    if (isInsideSquare(geometry.corners.sw.x, geometry.corners.sw.y, cornerSize)) return "resize-sw";
 
-    const nearestSide = sideCandidates
-      .filter((candidate) =>
-        isScreenPointInsideCenteredSquare(screenPoint, candidate.point, sideSizePx)
-      )
-      .sort(
-        (a, b) =>
-          getSquareHandleDistance(screenPoint, a.point) -
-          getSquareHandleDistance(screenPoint, b.point)
-      )[0];
+    if (isInsideSquare(geometry.sides.n.x, geometry.sides.n.y, sideSize)) return "resize-n";
 
-    if (nearestSide) {
-      return nearestSide.type;
-    }
+    if (isInsideSquare(geometry.sides.e.x, geometry.sides.e.y, sideSize)) return "resize-e";
+
+    if (isInsideSquare(geometry.sides.s.x, geometry.sides.s.y, sideSize)) return "resize-s";
+
+    if (isInsideSquare(geometry.sides.w.x, geometry.sides.w.y, sideSize)) return "resize-w";
+
   }
 
   return null;
-}
-  
+
+}  
 function renderSelectionOverlayScreen(shape: Shape, camera: CameraState) {
   const mainSize = 18;
   const sideSize = 16;
