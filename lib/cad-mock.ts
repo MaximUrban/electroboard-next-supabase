@@ -19,6 +19,12 @@ export function createMockCadAssetFromDrawing(
 
   const layers: CadLayer[] = [
     {
+      id: "preview",
+      name: "Preview image",
+      visible: true,
+      color: "#ffffff",
+    },
+    {
       id: "outline",
       name: "Outline",
       visible: true,
@@ -76,6 +82,7 @@ export function createMockCadAssetFromDrawing(
   });
 
   const leverWidth = Math.max(10, Math.min(24, width * 0.24));
+
   primitives.push({
     type: "polyline",
     layerId: "details",
