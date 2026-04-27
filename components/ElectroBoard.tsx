@@ -158,9 +158,10 @@ type InteractionState = {
   shapeId: string;
   startPointer: { x: number; y: number };
   initialShape: Shape;
-  initialSelection?: Shape[];
   resizeFromCenter?: boolean;
   keepAspectRatio?: boolean;
+  selectedShapeIds?: string[];
+  initialShapes?: Shape[];
 };
 
 type HistoryState = {
@@ -230,7 +231,6 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [clipboardShapes, setClipboardShapes] = useState<Shape[]>([]);
-  const [pasteCounter, setPasteCounter] = useState(0);
   const [draftLine, setDraftLine] = useState<LineShape | null>(null);
   const [interaction, setInteraction] = useState<InteractionState | null>(null);
   const [calibrationPoints, setCalibrationPoints] = useState<CalibrationPoint[]>([]);
@@ -256,10 +256,12 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   const [historyIndex, setHistoryIndex] = useState(-1);
 
   const selectedShape = useMemo(
-    () =>
-      selectedIds.length === 1
-        ? shapes.find((s) => s.id === selectedIds[0]) || null
-        : null,
+    () => shapes.find((s) => s.id === selectedId) || null,
+    [shapes, selectedId]
+  );
+
+  const selectedShapes = useMemo(
+    () => shapes.filter((s) => selectedIds.includes(s.id)),
     [shapes, selectedIds]
   );
 
@@ -272,98 +274,6 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     () => buildEstimate(shapes, metersPerPixel),
     [shapes, metersPerPixel]
   );
-
-  function selectOnly(id: string | null) {
-    setSelectedId(id);
-    setSelectedIds(id ? [id] : []);
-  }
-
-  function setSelection(ids: string[], primaryId?: string | null) {
-    const uniqueIds = [...new Set(ids)];
-    setSelectedIds(uniqueIds);
-    setSelectedId(
-      primaryId && uniqueIds.includes(primaryId)
-        ? primaryId
-        : uniqueIds[0] ?? null
-    );
-  }
-
-  function toggleSelection(id: string) {
-    setSelectedIds((prev) => {
-      const next = prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id];
-      setSelectedId(next.includes(id) ? id : next[0] ?? null);
-      return next;
-    });
-  }
-
-  function cloneShapeForPaste(shape: Shape, offset: number): Shape {
-    const copy = cloneDeep(shape);
-    const nextId = crypto.randomUUID();
-    copy.id = nextId;
-
-    if (copy.type === "line" || copy.type === "cable") {
-      copy.startAttachment = undefined;
-      copy.endAttachment = undefined;
-      copy.x += offset;
-      copy.y += offset;
-      copy.x2 += offset;
-      copy.y2 += offset;
-      return copy;
-    }
-
-    if (copy.type === "circle") {
-      copy.x += offset;
-      copy.y += offset;
-      return copy;
-    }
-
-    copy.x += offset;
-    copy.y += offset;
-    return copy;
-  }
-
-  function copySelectedToClipboard() {
-    if (selectedIds.length === 0) return;
-    const selected = shapes.filter((shape) => selectedIds.includes(shape.id));
-    if (selected.length === 0) return;
-    setClipboardShapes(cloneDeep(selected));
-    setStatus(`Скопировано: ${selected.length}`);
-  }
-
-  function cutSelectedToClipboard() {
-    if (selectedIds.length === 0) return;
-    const selected = shapes.filter((shape) => selectedIds.includes(shape.id));
-    if (selected.length === 0) return;
-    setClipboardShapes(cloneDeep(selected));
-    setShapes((prev) => {
-      const next = prev.filter((shape) => !selectedIds.includes(shape.id));
-      window.setTimeout(() => commitHistory(next), 0);
-      return next;
-    });
-    selectOnly(null);
-    setStatus(`Вырезано: ${selected.length}`);
-  }
-
-  function pasteClipboard() {
-    if (clipboardShapes.length === 0) return;
-
-    const offset = 20 * (pasteCounter + 1);
-    const pasted = clipboardShapes.map((shape) => cloneShapeForPaste(shape, offset));
-
-    setShapes((prev) => {
-      const next = [...prev, ...pasted];
-      window.setTimeout(() => commitHistory(next), 0);
-      return next;
-    });
-
-    setPasteCounter((prev) => prev + 1);
-    setSelection(
-      pasted.map((shape) => shape.id),
-      pasted[pasted.length - 1]?.id ?? null
-    );
-    setStatus(`Вставлено: ${pasted.length}`);
-  }
-
 
   useEffect(() => {
     const saved = getProjectById(projectId);
@@ -456,17 +366,15 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
         return;
       }
 
-      if (isTyping) return;
-
       if (mod && e.key.toLowerCase() === "c") {
         e.preventDefault();
-        copySelectedToClipboard();
+        copySelected();
         return;
       }
 
       if (mod && e.key.toLowerCase() === "x") {
         e.preventDefault();
-        cutSelectedToClipboard();
+        cutSelected();
         return;
       }
 
@@ -476,13 +384,28 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
         return;
       }
 
+      if (mod && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        setMultiSelection(shapes.map((shape) => shape.id));
+        return;
+      }
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSingleSelection(null);
+        setInteraction(null);
+        return;
+      }
+
+      if (isTyping) return;
+
       if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.length > 0) {
         e.preventDefault();
         deleteSelected();
         return;
       }
 
-      if (selectedIds.length === 0) return;
+      if (!selectedId) return;
 
       const step = e.shiftKey ? 10 : 1;
 
@@ -503,7 +426,103 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [loaded, selectedIds, shapes, clipboardShapes, pasteCounter, history, historyIndex]);
+  }, [loaded, selectedId, selectedIds, history, historyIndex, shapes, selectedShape, selectedShapes, clipboardShapes]);
+
+  function setSingleSelection(id: string | null) {
+    setSelectedId(id);
+    setSelectedIds(id ? [id] : []);
+  }
+
+  function setMultiSelection(ids: string[], primaryId?: string | null) {
+    const uniqueIds = Array.from(new Set(ids));
+    setSelectedIds(uniqueIds);
+    if (primaryId === undefined) {
+      setSelectedId(uniqueIds.length > 0 ? uniqueIds[uniqueIds.length - 1] : null);
+    } else {
+      setSelectedId(primaryId);
+    }
+  }
+
+  function copySelected() {
+    const targets = selectedShapes.length > 0 ? selectedShapes : selectedShape ? [selectedShape] : [];
+    if (targets.length === 0) return;
+    setClipboardShapes(cloneDeep(targets));
+    setStatus(targets.length === 1 ? "Объект скопирован" : `Скопировано: ${targets.length}`);
+  }
+
+  function buildPastedShapes(sourceShapes: Shape[]) {
+    const sourceIds = new Set(sourceShapes.map((shape) => shape.id));
+    const idMap = new Map<string, string>();
+
+    const pasted = sourceShapes.map((shape) => {
+      const copy = cloneDeep(shape);
+      const nextId = crypto.randomUUID();
+      idMap.set(shape.id, nextId);
+      copy.id = nextId;
+
+      if (copy.type === "line" || copy.type === "cable") {
+        copy.x += 24;
+        copy.y += 24;
+        copy.x2 += 24;
+        copy.y2 += 24;
+      } else if (copy.type === "circle") {
+        copy.x += 24;
+        copy.y += 24;
+      } else {
+        copy.x += 24;
+        copy.y += 24;
+      }
+
+      return copy;
+    });
+
+    return pasted.map((shape) => {
+      if (shape.type !== "line" && shape.type !== "cable") return shape;
+
+      const nextStart =
+        shape.startAttachment && sourceIds.has(shape.startAttachment.shapeId)
+          ? {
+              shapeId: idMap.get(shape.startAttachment.shapeId) || shape.startAttachment.shapeId,
+              anchorId: shape.startAttachment.anchorId,
+            }
+          : undefined;
+
+      const nextEnd =
+        shape.endAttachment && sourceIds.has(shape.endAttachment.shapeId)
+          ? {
+              shapeId: idMap.get(shape.endAttachment.shapeId) || shape.endAttachment.shapeId,
+              anchorId: shape.endAttachment.anchorId,
+            }
+          : undefined;
+
+      return {
+        ...shape,
+        startAttachment: nextStart,
+        endAttachment: nextEnd,
+      };
+    });
+  }
+
+  function pasteClipboard() {
+    if (clipboardShapes.length === 0) return;
+
+    const pasted = buildPastedShapes(clipboardShapes);
+    setShapes((prev) => {
+      const next = applyAttachments([...prev, ...pasted]);
+      window.setTimeout(() => commitHistory(next), 0);
+      return next;
+    });
+    setMultiSelection(pasted.map((shape) => shape.id));
+    setStatus(pasted.length === 1 ? "Объект вставлен" : `Вставлено: ${pasted.length}`);
+  }
+
+  function cutSelected() {
+    const targets = selectedShapes.length > 0 ? selectedShapes : selectedShape ? [selectedShape] : [];
+    if (targets.length === 0) return;
+    setClipboardShapes(cloneDeep(targets));
+    deleteSelected();
+    setStatus(targets.length === 1 ? "Объект вырезан" : `Вырезано: ${targets.length}`);
+  }
 
   function persistProjectData(data: HistoryState, animate = true) {
     if (!loaded) return;
@@ -592,7 +611,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     setCalibrationPoints(cloneDeep(state.calibrationPoints));
     setMetersPerPixel(state.metersPerPixel);
     setProjectName(state.projectName);
-    selectOnly(null);
+    setSingleSelection(null);
     setInteraction(null);
     setDraftLine(null);
     setHoverAnchorState(null);
@@ -757,13 +776,32 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     });
   }
 
+  function moveShapeWithDeltaFromInitial(initialShape: Shape, dx: number, dy: number): Shape {
+    if (initialShape.type === "line" || initialShape.type === "cable") {
+      return {
+        ...initialShape,
+        x: initialShape.x + dx,
+        y: initialShape.y + dy,
+        x2: initialShape.x2 + dx,
+        y2: initialShape.y2 + dy,
+      };
+    }
+
+    if (initialShape.type === "circle") {
+      return { ...initialShape, x: initialShape.x + dx, y: initialShape.y + dy };
+    }
+
+    return { ...initialShape, x: initialShape.x + dx, y: initialShape.y + dy } as Shape;
+  }
+
   function nudgeSelected(dx: number, dy: number) {
     if (selectedIds.length === 0) return;
+    const selectedSet = new Set(selectedIds);
 
     setShapes((prev) => {
       const next = applyAttachments(
         prev.map((shape) => {
-          if (!selectedIds.includes(shape.id)) return shape;
+          if (!selectedSet.has(shape.id)) return shape;
 
           if (shape.type === "line" || shape.type === "cable") {
             return {
@@ -911,7 +949,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       return nextAssets;
     });
 
-    setSelection([shape.id], shape.id);
+    setSingleSelection(shape.id);
     setShowLibrary(false);
   }
 
@@ -962,7 +1000,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       return nextAssets;
     });
 
-    selectOnly(shape.id);
+    setSingleSelection(shape.id);
   }
 
   function startHandleInteraction(
@@ -976,7 +1014,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     const screenPoint = getScreenPoint(e.clientX, e.clientY);
     const point = screenToWorld(screenPoint.x, screenPoint.y);
 
-    selectOnly(shape.id);
+    setSingleSelection(shape.id);
     setInteraction({
       mode,
       shapeId: shape.id,
@@ -1075,8 +1113,6 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
             shapeId: selectedShape.id,
             startPointer: point,
             initialShape: cloneDeep(selectedShape),
-            resizeFromCenter: e.altKey,
-            keepAspectRatio: e.shiftKey,
           });
           if (handle === "line-start" || handle === "line-end") {
             updateHoverAnchors(point, selectedShape.id);
@@ -1088,59 +1124,55 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       const hit = [...shapes].reverse().find((shape) => isPointOnShape(point.x, point.y, shape));
 
       if (hit) {
-        const multiSelectModifier = e.shiftKey || e.metaKey || e.ctrlKey;
+        if (e.altKey) {
+          const duplicated = duplicateShapeWithoutAttachments(hit);
+          setShapes((prev) => {
+            const next = [...prev, duplicated];
+            window.setTimeout(() => commitHistory(next), 0);
+            return next;
+          });
+          setSingleSelection(duplicated.id);
+          setInteraction({
+            mode: "move",
+            shapeId: duplicated.id,
+            startPointer: point,
+            initialShape: cloneDeep(duplicated),
+            selectedShapeIds: [duplicated.id],
+            initialShapes: [cloneDeep(duplicated)],
+          });
+          return;
+        }
 
-        if (multiSelectModifier && !e.altKey) {
-          toggleSelection(hit.id);
+        if (e.shiftKey) {
+          const alreadySelected = selectedIds.includes(hit.id);
+          const nextIds = alreadySelected
+            ? selectedIds.filter((id) => id !== hit.id)
+            : [...selectedIds, hit.id];
+          setMultiSelection(nextIds, alreadySelected ? (nextIds[0] || null) : hit.id);
           setInteraction(null);
           return;
         }
 
-        if (e.altKey) {
-          const duplicateSourceIds =
-            selectedIds.length > 1 && selectedIds.includes(hit.id) ? selectedIds : [hit.id];
-          const sourceShapes = shapes.filter((shape) => duplicateSourceIds.includes(shape.id));
-          const duplicated = sourceShapes.map((shape) => duplicateShapeWithoutAttachments(shape));
+        const moveIds = selectedIds.includes(hit.id) && selectedIds.length > 1
+          ? selectedIds
+          : [hit.id];
+        const initialShapes = moveIds
+          .map((id) => shapes.find((shape) => shape.id === id))
+          .filter(Boolean) as Shape[];
 
-          setShapes((prev) => {
-            const next = [...prev, ...duplicated];
-            window.setTimeout(() => commitHistory(next), 0);
-            return next;
-          });
-
-          setSelection(
-            duplicated.map((shape) => shape.id),
-            duplicated.find((shape) => shape.type === hit.type)?.id ?? duplicated[0]?.id ?? null
-          );
-
-          setInteraction({
-            mode: "move",
-            shapeId: duplicated[0]?.id ?? hit.id,
-            startPointer: point,
-            initialShape: cloneDeep(duplicated[0] ?? hit),
-            initialSelection: cloneDeep(duplicated),
-          });
-          return;
-        }
-
-        const activeIds =
-          selectedIds.length > 1 && selectedIds.includes(hit.id) ? selectedIds : [hit.id];
-        const initialSelection = shapes.filter((shape) => activeIds.includes(shape.id));
-
-        setSelection(activeIds, hit.id);
+        setMultiSelection(moveIds, hit.id);
         setInteraction({
           mode: "move",
           shapeId: hit.id,
           startPointer: point,
           initialShape: cloneDeep(hit),
-          initialSelection: cloneDeep(initialSelection),
+          selectedShapeIds: moveIds,
+          initialShapes: cloneDeep(initialShapes),
         });
         return;
       }
 
-      if (!(e.shiftKey || e.metaKey || e.ctrlKey)) {
-        selectOnly(null);
-      }
+      setSingleSelection(null);
       setInteraction(null);
       setPanState({
         startScreen: screenPoint,
@@ -1165,7 +1197,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
         window.setTimeout(() => commitHistory(next), 0);
         return next;
       });
-      selectOnly(shape.id);
+      setSingleSelection(shape.id);
       setTool("select");
       return;
     }
@@ -1185,7 +1217,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
         window.setTimeout(() => commitHistory(next), 0);
         return next;
       });
-      selectOnly(shape.id);
+      setSingleSelection(shape.id);
       setTool("select");
       return;
     }
@@ -1208,7 +1240,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
         window.setTimeout(() => commitHistory(next), 0);
         return next;
       });
-      selectOnly(shape.id);
+      setSingleSelection(shape.id);
       setTool("select");
       return;
     }
@@ -1231,7 +1263,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
         window.setTimeout(() => commitHistory(next), 0);
         return next;
       });
-      selectOnly(shape.id);
+      setSingleSelection(shape.id);
       setTool("select");
       return;
     }
@@ -1263,7 +1295,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       };
 
       setDraftLine(shape);
-      selectOnly(shape.id);
+      setSingleSelection(shape.id);
       updateHoverAnchors(point, shape.id);
     }
   }
@@ -1308,7 +1340,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     }
 
     if (!interaction) {
-  if (selectedShape && selectedIds.length === 1) {
+  if (selectedShape) {
     const hoveredHandle = hitTestHandleScreen(screenPoint, selectedShape, camera);
     if (hoveredHandle) {
       setCanvasCursor(getCursorByHandleForShape(hoveredHandle, selectedShape));
@@ -1341,17 +1373,17 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     }
 
     setShapes((prev) => {
-  let updated: Shape[];
+  let updated = prev;
 
-  if (interaction.mode === "move" && interaction.initialSelection && interaction.initialSelection.length > 1) {
-    const initialMap = new Map<string, Shape>(interaction.initialSelection.map((shape) => [shape.id, shape] as [string, Shape]));
+  if (interaction.mode === "move" && interaction.selectedShapeIds && interaction.initialShapes) {
+    const initialById = new Map(interaction.initialShapes.map((shape) => [shape.id, shape]));
     const rawDx = point.x - interaction.startPointer.x;
     const rawDy = point.y - interaction.startPointer.y;
 
     updated = prev.map((shape) => {
-      const initialSelectedShape = initialMap.get(shape.id);
-      if (!initialSelectedShape) return shape;
-      return moveShapeBy(initialSelectedShape, rawDx, rawDy);
+      if (!interaction.selectedShapeIds?.includes(shape.id)) return shape;
+      const initialForShape = initialById.get(shape.id) || shape;
+      return moveShapeWithDeltaFromInitial(initialForShape, rawDx, rawDy);
     });
   } else {
     updated = prev.map((shape) =>
@@ -1503,17 +1535,19 @@ setCanvasCursor("grab");
   function deleteSelected() {
     if (selectedIds.length === 0) return;
     setShapes((prev) => {
-      const next = prev.filter((s) => !selectedIds.includes(s.id));
+      const selectedSet = new Set(selectedIds);
+      const next = prev.filter((s) => !selectedSet.has(s.id));
       window.setTimeout(() => commitHistory(next), 0);
       return next;
     });
-    selectOnly(null);
+    setSingleSelection(null);
   }
 
   function clearAllConfirmed() {
     setShapes([]);
     setCadAssets([]);
-    selectOnly(null);
+    setSingleSelection(null);
+    setClipboardShapes([]);
     setDraftLine(null);
     setCalibrationPoints([]);
     setInteraction(null);
@@ -1718,7 +1752,7 @@ setCanvasCursor("grab");
                 ) : null}
               </g>
 {renderAlignmentGuidesScreen(alignmentGuides, camera, canvasSize)}
-{selectedShape && selectedIds.length === 1 ? renderSelectionOverlayScreen(selectedShape, camera, startHandleInteraction) : null}
+{selectedShapes.map((shape) => renderSelectionOverlayScreen(shape, camera, startHandleInteraction, shape.id === selectedId))}
             </svg>
 
             <div style={styles.zoomControls}>
@@ -1770,9 +1804,7 @@ setCanvasCursor("grab");
             <div style={styles.cardTitle}>Объект</div>
 
             {!selectedShape ? (
-              <div style={styles.hintCompact}>
-                {selectedIds.length > 1 ? `Выбрано объектов: ${selectedIds.length}` : "Ничего не выбрано"}
-              </div>
+              <div style={styles.hintCompact}>Ничего не выбрано</div>
             ) : (
               <>
                 <div style={styles.compactField}>
@@ -2061,17 +2093,18 @@ setCanvasCursor("grab");
       {showHelp ? (
         <Modal title="Горячие клавиши" onClose={() => setShowHelp(false)}>
           <div style={styles.modalList}>
-            <div>Delete / Backspace — удалить выбранное</div>
+            <div>Delete / Backspace — удалить выбранные</div>
+            <div>Shift + click — множественный выбор / снять элемент из выбора</div>
+            <div>Ctrl/Cmd + C — копировать</div>
+            <div>Ctrl/Cmd + X — вырезать</div>
+            <div>Ctrl/Cmd + V — вставить</div>
+            <div>Ctrl/Cmd + A — выбрать все</div>
+            <div>Escape — снять выделение</div>
             <div>Ctrl/Cmd + Z — назад</div>
             <div>Ctrl/Cmd + Shift + Z или Ctrl/Cmd + Y — вперед</div>
             <div>Стрелки — сдвиг на 1px</div>
             <div>Shift + стрелки — сдвиг на 10px</div>
             <div>Alt + drag — дублирование без привязок</div>
-            <div>Shift + click — множественный выбор</div>
-            <div>Ctrl/Cmd + click — добавить или убрать объект из выбора</div>
-            <div>Ctrl/Cmd + C — копировать</div>
-            <div>Ctrl/Cmd + X — вырезать</div>
-            <div>Ctrl/Cmd + V — вставить</div>
             <div>Колесо мыши — zoom</div>
             <div>Тянуть пустое место — перемещение полотна</div>
           </div>
@@ -3270,183 +3303,159 @@ function getShapeCenter(shape: Shape) {
   return { x: (shape.x + shape.x2) / 2, y: (shape.y + shape.y2) / 2 };
 }
 
-
-function rotateVector(x: number, y: number, angleDegValue: number) {
-  const angle = (angleDegValue * Math.PI) / 180;
+function toLocalDelta(dx: number, dy: number, rotationDegValue: number) {
+  const angle = (-rotationDegValue * Math.PI) / 180;
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
   return {
-    x: x * cos - y * sin,
-    y: x * sin + y * cos,
+    x: dx * cos - dy * sin,
+    y: dx * sin + dy * cos,
   };
 }
 
-function getRectLikeMetrics(shape: RectangleShape | SocketShape | SwitchShape | CadShape) {
-  if (shape.type === "rectangle" || shape.type === "cad") {
-    return {
-      centerX: shape.x + shape.width / 2,
-      centerY: shape.y + shape.height / 2,
-      width: shape.width,
-      height: shape.height,
-      rotation: shape.rotation,
-    };
-  }
-
-  return {
-    centerX: shape.x,
-    centerY: shape.y,
-    width: shape.width,
-    height: shape.height,
-    rotation: shape.rotation,
-  };
-}
-
-function buildRectLikeFromCenter(
-  originalShape: RectangleShape | SocketShape | SwitchShape | CadShape,
+function localPointToWorld(
+  localX: number,
+  localY: number,
   centerX: number,
   centerY: number,
-  width: number,
-  height: number
-): RectangleShape | SocketShape | SwitchShape | CadShape {
-  if (originalShape.type === "rectangle" || originalShape.type === "cad") {
-    return {
-      ...originalShape,
-      x: centerX - width / 2,
-      y: centerY - height / 2,
-      width,
-      height,
-    };
-  }
-
-  return {
-    ...originalShape,
-    x: centerX,
-    y: centerY,
-    width,
-    height,
-  };
+  rotationDegValue: number
+) {
+  const rotated = rotatePoint(localX + centerX, localY + centerY, centerX, centerY, rotationDegValue);
+  return { x: rotated.x, y: rotated.y };
 }
 
-function resizeRectLikeShape(
+function resizeRectLikeShapeLocal(
   shape: RectangleShape | SocketShape | SwitchShape | CadShape,
   interaction: InteractionState,
   point: { x: number; y: number }
 ): RectangleShape | SocketShape | SwitchShape | CadShape {
-  const initialShape = interaction.initialShape as RectangleShape | SocketShape | SwitchShape | CadShape;
-  const { centerX, centerY, width, height, rotation } = getRectLikeMetrics(initialShape);
-
-  const localPointer = rotatePoint(point.x, point.y, centerX, centerY, -rotation);
-  const localTarget = {
-    x: localPointer.x - centerX,
-    y: localPointer.y - centerY,
+  const keepAspectRatio = Boolean(interaction.keepAspectRatio);
+  const resizeFromCenter = Boolean(interaction.resizeFromCenter);
+  const center = getShapeCenter(shape);
+  const startLocal = toLocalDelta(
+    interaction.startPointer.x - center.x,
+    interaction.startPointer.y - center.y,
+    shape.rotation
+  );
+  const pointLocal = toLocalDelta(point.x - center.x, point.y - center.y, shape.rotation);
+  const deltaLocal = {
+    x: (pointLocal.x - startLocal.x) * RESIZE_SENSITIVITY,
+    y: (pointLocal.y - startLocal.y) * RESIZE_SENSITIVITY,
   };
 
-  const halfW = width / 2;
-  const halfH = height / 2;
-  const ratio = width / Math.max(height, 0.0001);
+  const initialWidth = shape.width;
+  const initialHeight = shape.height;
+  const ratio = initialWidth / Math.max(initialHeight, 1);
   const minSize = 16;
 
-  let minX = -halfW;
-  let maxX = halfW;
-  let minY = -halfH;
-  let maxY = halfH;
+  let left = -initialWidth / 2;
+  let right = initialWidth / 2;
+  let top = -initialHeight / 2;
+  let bottom = initialHeight / 2;
 
-  const fromCenter = Boolean(interaction.resizeFromCenter);
-  const keepRatio = Boolean(interaction.keepAspectRatio);
+  const hasEast = interaction.mode === "resize-e" || interaction.mode === "resize-ne" || interaction.mode === "resize-se";
+  const hasWest = interaction.mode === "resize-w" || interaction.mode === "resize-nw" || interaction.mode === "resize-sw";
+  const hasNorth = interaction.mode === "resize-n" || interaction.mode === "resize-ne" || interaction.mode === "resize-nw";
+  const hasSouth = interaction.mode === "resize-s" || interaction.mode === "resize-se" || interaction.mode === "resize-sw";
 
-  const moveLeft = interaction.mode === "resize-w" || interaction.mode === "resize-nw" || interaction.mode === "resize-sw";
-  const moveRight = interaction.mode === "resize-e" || interaction.mode === "resize-ne" || interaction.mode === "resize-se";
-  const moveTop = interaction.mode === "resize-n" || interaction.mode === "resize-nw" || interaction.mode === "resize-ne";
-  const moveBottom = interaction.mode === "resize-s" || interaction.mode === "resize-sw" || interaction.mode === "resize-se";
+  if (resizeFromCenter) {
+    let halfWidth = initialWidth / 2;
+    let halfHeight = initialHeight / 2;
 
-  if (fromCenter) {
-    if (moveLeft || moveRight) {
-      const nextHalfW = Math.max(minSize / 2, Math.abs(localTarget.x));
-      minX = -nextHalfW;
-      maxX = nextHalfW;
+    if (hasEast) halfWidth = Math.max(minSize / 2, initialWidth / 2 + deltaLocal.x);
+    if (hasWest) halfWidth = Math.max(minSize / 2, initialWidth / 2 - deltaLocal.x);
+    if (hasSouth) halfHeight = Math.max(minSize / 2, initialHeight / 2 + deltaLocal.y);
+    if (hasNorth) halfHeight = Math.max(minSize / 2, initialHeight / 2 - deltaLocal.y);
+
+    if (keepAspectRatio) {
+      if (isCornerResizeHandle(interaction.mode)) {
+        const widthDriven = Math.abs((halfWidth * 2) - initialWidth) >= Math.abs(((halfHeight * 2) - initialHeight) * ratio);
+        if (widthDriven) {
+          halfHeight = Math.max(minSize / 2, halfWidth / Math.max(ratio, 0.0001));
+        } else {
+          halfWidth = Math.max(minSize / 2, halfHeight * ratio);
+        }
+      } else if (hasEast || hasWest) {
+        halfHeight = Math.max(minSize / 2, halfWidth / Math.max(ratio, 0.0001));
+      } else if (hasNorth || hasSouth) {
+        halfWidth = Math.max(minSize / 2, halfHeight * ratio);
+      }
     }
 
-    if (moveTop || moveBottom) {
-      const nextHalfH = Math.max(minSize / 2, Math.abs(localTarget.y));
-      minY = -nextHalfH;
-      maxY = nextHalfH;
-    }
+    left = -halfWidth;
+    right = halfWidth;
+    top = -halfHeight;
+    bottom = halfHeight;
   } else {
-    if (moveLeft) minX = Math.min(maxX - minSize, localTarget.x);
-    if (moveRight) maxX = Math.max(minX + minSize, localTarget.x);
-    if (moveTop) minY = Math.min(maxY - minSize, localTarget.y);
-    if (moveBottom) maxY = Math.max(minY + minSize, localTarget.y);
-  }
+    if (hasEast) right += deltaLocal.x;
+    if (hasWest) left += deltaLocal.x;
+    if (hasSouth) bottom += deltaLocal.y;
+    if (hasNorth) top += deltaLocal.y;
 
-  if (keepRatio) {
-    const activeCorner = isCornerResizeHandle(interaction.mode);
-    const currentWidth = maxX - minX;
-    const currentHeight = maxY - minY;
+    if (right - left < minSize) {
+      if (hasWest && !hasEast) left = right - minSize;
+      else right = left + minSize;
+    }
 
-    if (activeCorner) {
-      let targetWidth = currentWidth;
-      let targetHeight = currentHeight;
+    if (bottom - top < minSize) {
+      if (hasNorth && !hasSouth) top = bottom - minSize;
+      else bottom = top + minSize;
+    }
 
-      if (currentWidth / Math.max(currentHeight, 0.0001) > ratio) {
-        targetHeight = Math.max(minSize, currentWidth / ratio);
-      } else {
-        targetWidth = Math.max(minSize, currentHeight * ratio);
-      }
-
-      if (fromCenter) {
-        minX = -targetWidth / 2;
-        maxX = targetWidth / 2;
-        minY = -targetHeight / 2;
-        maxY = targetHeight / 2;
-      } else {
-        if (moveLeft) minX = maxX - targetWidth;
-        if (moveRight) maxX = minX + targetWidth;
-        if (moveTop) minY = maxY - targetHeight;
-        if (moveBottom) maxY = minY + targetHeight;
-      }
-    } else {
-      if (moveLeft || moveRight) {
-        const targetWidth = maxX - minX;
-        const targetHeight = Math.max(minSize, targetWidth / ratio);
-
-        if (fromCenter || !moveTop && !moveBottom) {
-          minY = -targetHeight / 2;
-          maxY = targetHeight / 2;
-        } else {
-          minY = maxY - targetHeight;
-        }
-      }
-
-      if (moveTop || moveBottom) {
-        const targetHeight = maxY - minY;
-        const targetWidth = Math.max(minSize, targetHeight * ratio);
-
-        if (fromCenter || !moveLeft && !moveRight) {
-          minX = -targetWidth / 2;
-          maxX = targetWidth / 2;
-        } else {
-          minX = maxX - targetWidth;
-        }
+    if (keepAspectRatio) {
+      if (isCornerResizeHandle(interaction.mode)) {
+        const anchorX = hasWest ? initialWidth / 2 : -initialWidth / 2;
+        const anchorY = hasNorth ? initialHeight / 2 : -initialHeight / 2;
+        let movingX = hasWest ? left : right;
+        let movingY = hasNorth ? top : bottom;
+        let nextWidth = Math.max(minSize, Math.abs(movingX - anchorX));
+        let nextHeight = Math.max(minSize, Math.abs(movingY - anchorY));
+        const widthDriven = Math.abs(nextWidth - initialWidth) >= Math.abs((nextHeight - initialHeight) * ratio);
+        if (widthDriven) nextHeight = Math.max(minSize, nextWidth / Math.max(ratio, 0.0001));
+        else nextWidth = Math.max(minSize, nextHeight * ratio);
+        movingX = anchorX + (hasWest ? -nextWidth : nextWidth);
+        movingY = anchorY + (hasNorth ? -nextHeight : nextHeight);
+        left = Math.min(anchorX, movingX);
+        right = Math.max(anchorX, movingX);
+        top = Math.min(anchorY, movingY);
+        bottom = Math.max(anchorY, movingY);
+      } else if (hasEast || hasWest) {
+        const anchorX = hasWest ? initialWidth / 2 : -initialWidth / 2;
+        let movingX = hasWest ? left : right;
+        const nextWidth = Math.max(minSize, Math.abs(movingX - anchorX));
+        const nextHeight = Math.max(minSize, nextWidth / Math.max(ratio, 0.0001));
+        movingX = anchorX + (hasWest ? -nextWidth : nextWidth);
+        left = Math.min(anchorX, movingX);
+        right = Math.max(anchorX, movingX);
+        const localCenterY = (top + bottom) / 2;
+        top = localCenterY - nextHeight / 2;
+        bottom = localCenterY + nextHeight / 2;
+      } else if (hasNorth || hasSouth) {
+        const anchorY = hasNorth ? initialHeight / 2 : -initialHeight / 2;
+        let movingY = hasNorth ? top : bottom;
+        const nextHeight = Math.max(minSize, Math.abs(movingY - anchorY));
+        const nextWidth = Math.max(minSize, nextHeight * ratio);
+        movingY = anchorY + (hasNorth ? -nextHeight : nextHeight);
+        top = Math.min(anchorY, movingY);
+        bottom = Math.max(anchorY, movingY);
+        const localCenterX = (left + right) / 2;
+        left = localCenterX - nextWidth / 2;
+        right = localCenterX + nextWidth / 2;
       }
     }
   }
 
-  const localCenterX = (minX + maxX) / 2;
-  const localCenterY = (minY + maxY) / 2;
-  const worldCenterOffset = rotateVector(localCenterX, localCenterY, rotation);
+  const nextLocalCenterX = (left + right) / 2;
+  const nextLocalCenterY = (top + bottom) / 2;
+  const nextCenter = localPointToWorld(nextLocalCenterX, nextLocalCenterY, center.x, center.y, shape.rotation);
+  const nextWidth = right - left;
+  const nextHeight = bottom - top;
 
-  const nextCenterX = centerX + worldCenterOffset.x;
-  const nextCenterY = centerY + worldCenterOffset.y;
-  const nextWidth = Math.max(minSize, maxX - minX);
-  const nextHeight = Math.max(minSize, maxY - minY);
+  if (shape.type === "rectangle" || shape.type === "cad") {
+    return { ...shape, x: nextCenter.x - nextWidth / 2, y: nextCenter.y - nextHeight / 2, width: nextWidth, height: nextHeight };
+  }
 
-  return buildRectLikeFromCenter(
-    shape,
-    nextCenterX,
-    nextCenterY,
-    nextWidth,
-    nextHeight
-  );
+  return { ...shape, x: nextCenter.x, y: nextCenter.y, width: nextWidth, height: nextHeight };
 }
 
 function transformShape(
@@ -3538,11 +3547,11 @@ function transformShape(
     shape.type === "cad";
 
   if ((isCornerResizeHandle(interaction.mode) || isSideResizeHandle(interaction.mode)) && isRectLike) {
-    return resizeRectLikeShape(
-      shape as RectangleShape | SocketShape | SwitchShape | CadShape,
+    return resizeRectLikeShapeLocal(
+      initial as RectangleShape | SocketShape | SwitchShape | CadShape,
       interaction,
       point
-    );
+    ) as Shape;
   }
 
   if (interaction.mode === "rotate") {
@@ -3808,7 +3817,8 @@ function renderSelectionOverlayScreen(
     e: React.MouseEvent<SVGElement>,
     shape: Shape,
     mode: HandleType
-  ) => void
+  ) => void,
+  interactive = true
 ) {
   const cornerSize = 16;
   const sideSize = 14;
@@ -3828,8 +3838,8 @@ function renderSelectionOverlayScreen(
     return (
       <g
         key={`${mode}-${x}-${y}`}
-        pointerEvents="all"
-        onMouseDown={(e) => onHandleMouseDown(e, shape, mode)}
+        pointerEvents={interactive ? "all" : "none"}
+        onMouseDown={(e) => interactive && onHandleMouseDown(e, shape, mode)}
         style={{ cursor }}
       >
         <rect
