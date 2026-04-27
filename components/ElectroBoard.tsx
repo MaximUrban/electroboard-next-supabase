@@ -610,10 +610,8 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       return;
     }
 
-    if (tool === "") {
       const shape: Shape = {
         id: crypto.randomUUID(),
-        type: "",
         x: point.x,
         y: point.y,
         width: 140,
