@@ -681,6 +681,9 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
   function nudgeSelected(dx: number, dy: number) {
     if (!selectedId) return;
 
+    const selected = shapes.find((shape) => shape.id === selectedId);
+    if (isShapeLocked(selected)) return;
+
     setShapes((prev) => {
       const next = applyAttachments(
         prev.map((shape) => {
@@ -963,54 +966,55 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
 
     if (tool === "select") {
       if (selectedShape && !isShapeLocked(selectedShape)) {
-  const handle = hitTestHandleScreen(screenPoint, selectedShape, camera);
-  if (handle) {
-    setInteraction({
-      mode: handle,
-      shapeId: selectedShape.id,
-      startPointer: point,
-      initialShape: cloneDeep(selectedShape),
-    });
-    if (handle === "line-start" || handle === "line-end") {
-      updateHoverAnchors(point, selectedShape.id);
-    }
-    return;
-  }
-}
+        const handle = hitTestHandleScreen(screenPoint, selectedShape, camera);
+        if (handle) {
+          setInteraction({
+            mode: handle,
+            shapeId: selectedShape.id,
+            startPointer: point,
+            initialShape: cloneDeep(selectedShape),
+          });
+          if (handle === "line-start" || handle === "line-end") {
+            updateHoverAnchors(point, selectedShape.id);
+          }
+          return;
+        }
+      }
 
-      const hit = [...shapes].reverse().find((shape) => isPointOnShape(point.x, point.y, shape));
+      const hit = [...shapes]
+        .reverse()
+        .find((shape) => hitTestShapeScreen(screenPoint, shape, camera));
 
       if (hit) {
-  if (e.altKey && !isShapeLocked(hit)) {
-    const duplicated = duplicateShapeWithoutAttachments(hit);
-    setShapes((prev) => {
-      const next = [...prev, duplicated];
-      window.setTimeout(() => commitHistory(next), 0);
-      return next;
-    });
-    setSelectedId(duplicated.id);
-    setInteraction({
-      mode: "move",
-      shapeId: duplicated.id,
-      startPointer: point,
-      initialShape: cloneDeep(duplicated),
-    });
-    return;
-  }
+        if (e.altKey && !isShapeLocked(hit)) {
+          const duplicated = duplicateShapeWithoutAttachments(hit);
+          setShapes((prev) => {
+            const next = [...prev, duplicated];
+            window.setTimeout(() => commitHistory(next), 0);
+            return next;
+          });
+          setSelectedId(duplicated.id);
+          setInteraction({
+            mode: "move",
+            shapeId: duplicated.id,
+            startPointer: point,
+            initialShape: cloneDeep(duplicated),
+          });
+          return;
+        }
 
-  setSelectedId(hit.id);
+        setSelectedId(hit.id);
 
-  if (!isShapeLocked(hit)) {
-    setInteraction({
-      mode: "move",
-      shapeId: hit.id,
-      startPointer: point,
-      initialShape: cloneDeep(hit),
-    });
-  }
-
-  return;
-}
+        if (!isShapeLocked(hit)) {
+          setInteraction({
+            mode: "move",
+            shapeId: hit.id,
+            startPointer: point,
+            initialShape: cloneDeep(hit),
+          });
+        }
+        return;
+      }
 
       setSelectedId(null);
       setInteraction(null);
@@ -1180,31 +1184,31 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
     }
 
     if (!interaction) {
-  if (selectedShape && !isShapeLocked(selectedShape)) {
-    const hoveredHandle = hitTestHandleScreen(screenPoint, selectedShape, camera);
-    if (hoveredHandle) {
-      setCanvasCursor(getCursorByHandle(hoveredHandle));
-    } else {
-      const hit = [...shapes].reverse().find((shape) =>
-        isPointOnShape(point.x, point.y, shape)
-      );
-      setCanvasCursor(hit && !isShapeLocked(hit) ? "move" : "grab");
+      if (selectedShape && !isShapeLocked(selectedShape)) {
+        const hoveredHandle = hitTestHandleScreen(screenPoint, selectedShape, camera);
+        if (hoveredHandle) {
+          setCanvasCursor(getCursorByHandle(hoveredHandle));
+        } else {
+          const hit = [...shapes]
+            .reverse()
+            .find((shape) => hitTestShapeScreen(screenPoint, shape, camera));
+          setCanvasCursor(hit && !isShapeLocked(hit) ? "move" : "grab");
+        }
+      } else {
+        const hit = [...shapes]
+          .reverse()
+          .find((shape) => hitTestShapeScreen(screenPoint, shape, camera));
+        setCanvasCursor(hit && !isShapeLocked(hit) ? "move" : "grab");
+      }
+
+      if (tool === "line" || tool === "cable") {
+        updateHoverAnchors(point);
+      } else {
+        clearHoverAnchors();
+      }
+
+      return;
     }
-  } else {
-    const hit = [...shapes].reverse().find((shape) =>
-      isPointOnShape(point.x, point.y, shape)
-    );
-    setCanvasCursor(hit && !isShapeLocked(hit) ? "move" : "grab");
-  }
-
-  if (tool === "line" || tool === "cable") {
-    updateHoverAnchors(point);
-  } else {
-    clearHoverAnchors();
-  }
-
-  return;
-}
     setCanvasCursor(getCursorByHandle(interaction.mode));
     if (interaction.mode === "line-start" || interaction.mode === "line-end") {
       updateHoverAnchors(point, interaction.shapeId);
@@ -1340,6 +1344,18 @@ setCanvasCursor("grab");
     const screen = getScreenPoint(e.clientX, e.clientY);
     const factor = e.deltaY < 0 ? 1.1 : 0.9;
     zoomAtScreenPoint(screen.x, screen.y, factor);
+  }
+
+  function reorderSelectedShape(
+    direction: "backward" | "forward" | "to-back" | "to-front"
+  ) {
+    if (!selectedId) return;
+
+    setShapes((prev) => {
+      const next = moveShapeInStack(prev, selectedId, direction);
+      window.setTimeout(() => commitHistory(next), 0);
+      return next;
+    });
   }
 
   function deleteSelected() {
@@ -1560,7 +1576,9 @@ setCanvasCursor("grab");
                 ) : null}
               </g>
 {renderAlignmentGuidesScreen(alignmentGuides, camera, canvasSize)}
-{selectedShape && !isShapeLocked(selectedShape)   ? renderSelectionOverlayScreen(selectedShape, camera)   : null}
+{selectedShape && !isShapeLocked(selectedShape)
+                ? renderSelectionOverlayScreen(selectedShape, camera)
+                : null}
             </svg>
 
             <div style={styles.zoomControls}>
@@ -1660,27 +1678,72 @@ setCanvasCursor("grab");
                     style={styles.inputCompact}
                   />
                 </div>
+
                 <div style={styles.compactField}>
-  <label style={styles.label}>Фиксация</label>
-  <label
-    style={{
-      display: "flex",
-      alignItems: "center",
-      gap: 8,
-      fontSize: 13,
-      color: "#dce7ff",
-    }}
-  >
-    <input
-      type="checkbox"
-      checked={Boolean(selectedShape.locked)}
-      onChange={(e) =>
-        setShapePatch(selectedShape.id, { locked: e.target.checked })
-      }
-    />
-    Зафиксировать элемент
-  </label>
-</div>
+                  <label style={styles.label}>Фиксация</label>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      fontSize: 13,
+                      color: "#dce7ff",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={Boolean(selectedShape.locked)}
+                      onChange={(e) =>
+                        setShapePatch(selectedShape.id, { locked: e.target.checked })
+                      }
+                    />
+                    Зафиксировать элемент
+                  </label>
+                </div>
+
+                <div style={styles.compactField}>
+                  <label style={styles.label}>Расположение</label>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 6,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      style={styles.btn}
+                      onClick={() => reorderSelectedShape("backward")}
+                    >
+                      Назад
+                    </button>
+
+                    <button
+                      type="button"
+                      style={styles.btn}
+                      onClick={() => reorderSelectedShape("forward")}
+                    >
+                      Вперед
+                    </button>
+
+                    <button
+                      type="button"
+                      style={styles.btn}
+                      onClick={() => reorderSelectedShape("to-back")}
+                    >
+                      На задний план
+                    </button>
+
+                    <button
+                      type="button"
+                      style={styles.btn}
+                      onClick={() => reorderSelectedShape("to-front")}
+                    >
+                      На передний план
+                    </button>
+                  </div>
+                </div>
 
                 {selectedShape.type === "cad" ? (
                   <>
@@ -2166,8 +2229,8 @@ function renderShape(
           style={{ cursor: "move" }}
         />
         <text x={shape.x + 6} y={shape.y - 10} fill="#f2f6ff" fontSize="14">
-  {shape.label} {shape.locked ? "🔒" : ""}
-</text>
+          {shape.label} {shape.locked ? "🔒" : ""}
+        </text>
       </g>
     );
   }
@@ -2186,8 +2249,8 @@ function renderShape(
           style={{ cursor: "move" }}
         />
         <text x={shape.x + shape.radius + 6} y={shape.y - shape.radius - 10} fill="#f2f6ff" fontSize="14">
-  {shape.label} {shape.locked ? "🔒" : ""}
-</text>
+          {shape.label} {shape.locked ? "🔒" : ""}
+        </text>
       </g>
     );
   }
@@ -2208,8 +2271,8 @@ function renderShape(
           style={{ cursor: "move" }}
         />
         <text x={(shape.x + shape.x2) / 2 + 6} y={(shape.y + shape.y2) / 2 - 6} fill="#f2f6ff" fontSize="14">
-  {shape.label} {shape.groupName ? `(${shape.groupName})` : ""} {shape.locked ? "🔒" : ""}
-</text>
+          {shape.label} {shape.groupName ? `(${shape.groupName})` : ""} {shape.locked ? "🔒" : ""}
+        </text>
       </g>
     );
   }
@@ -2232,7 +2295,7 @@ function renderShape(
         <circle cx={shape.x - 8} cy={shape.y} r="4" fill={stroke} />
         <circle cx={shape.x + 8} cy={shape.y} r="4" fill={stroke} />
         <text x={shape.x + 28} y={shape.y + 4} fill="#f2f6ff" fontSize="14">
-          {shape.label} {shape.groupName || ""}
+          {shape.label} {shape.groupName || ""} {shape.locked ? "🔒" : ""}
         </text>
       </g>
     );
@@ -2263,7 +2326,7 @@ function renderShape(
           strokeLinecap="round"
         />
         <text x={shape.x + 28} y={shape.y + 4} fill="#f2f6ff" fontSize="14">
-          {shape.label} {shape.groupName || ""}
+          {shape.label} {shape.groupName || ""} {shape.locked ? "🔒" : ""}
         </text>
       </g>
     );
@@ -2337,7 +2400,7 @@ function renderShape(
         </g>
 
         <text x={shape.x} y={shape.y - 10} fill="#f2f6ff" fontSize="14">
-          {shape.label}
+          {shape.label} {shape.locked ? "🔒" : ""}
         </text>
       </g>
     );
@@ -2834,6 +2897,7 @@ function transformShape(
   point: { x: number; y: number },
   allShapes: Shape[]
 ): Shape {
+  if (isShapeLocked(shape)) return shape;
   const dx = point.x - interaction.startPointer.x;
   const dy = point.y - interaction.startPointer.y;
   const initial = interaction.initialShape;
@@ -3459,6 +3523,17 @@ function projectWorldToScreen(
     y: camera.y + worldY * camera.zoom,
   };
 }
+function screenToWorldPoint(
+  screenX: number,
+  screenY: number,
+  camera: CameraState
+) {
+  return {
+    x: (screenX - camera.x) / camera.zoom,
+    y: (screenY - camera.y) / camera.zoom,
+  };
+}
+
 function rotatePoint(px: number, py: number, cx: number, cy: number, angleDegValue: number) {
   const angle = (angleDegValue * Math.PI) / 180;
   const cos = Math.cos(angle);
@@ -3496,6 +3571,39 @@ function isSideResizeHandle(handle: HandleType) {
 function isShapeLocked(shape: Shape | null | undefined) {
   return Boolean(shape?.locked);
 }
+
+function moveShapeInStack(
+  shapes: Shape[],
+  shapeId: string,
+  direction: "backward" | "forward" | "to-back" | "to-front"
+) {
+  const index = shapes.findIndex((shape) => shape.id === shapeId);
+  if (index === -1) return shapes;
+
+  const next = [...shapes];
+  const [item] = next.splice(index, 1);
+
+  if (direction === "to-back") {
+    next.unshift(item);
+    return next;
+  }
+
+  if (direction === "to-front") {
+    next.push(item);
+    return next;
+  }
+
+  if (direction === "backward") {
+    const targetIndex = Math.max(0, index - 1);
+    next.splice(targetIndex, 0, item);
+    return next;
+  }
+
+  const targetIndex = Math.min(next.length, index + 1);
+  next.splice(targetIndex, 0, item);
+  return next;
+}
+
 function getCursorByHandle(handle: HandleType): React.CSSProperties["cursor"] {
   switch (handle) {
     case "move":
@@ -3692,9 +3800,93 @@ function lineLengthMeters(shape: LineShape, metersPerPixel: number) {
   return metersPerPixel > 0 ? px * metersPerPixel : px;
 }
 
+function pointInRotatedRectWorld(
+  px: number,
+  py: number,
+  centerX: number,
+  centerY: number,
+  width: number,
+  height: number,
+  rotation: number,
+  padding = 0
+) {
+  const angle = (-rotation * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const dx = px - centerX;
+  const dy = py - centerY;
+
+  const localX = dx * cos - dy * sin;
+  const localY = dx * sin + dy * cos;
+
+  return (
+    Math.abs(localX) <= width / 2 + padding &&
+    Math.abs(localY) <= height / 2 + padding
+  );
+}
+
+function screenPaddingToWorld(camera: CameraState, px: number) {
+  return px / Math.max(camera.zoom, 0.0001);
+}
+
+function hitTestShapeScreen(
+  screenPoint: { x: number; y: number },
+  shape: Shape,
+  camera: CameraState
+) {
+  const worldPoint = screenToWorldPoint(screenPoint.x, screenPoint.y, camera);
+  const worldPadding = screenPaddingToWorld(camera, 12);
+
+  if (shape.type === "rectangle" || shape.type === "cad") {
+    return pointInRotatedRectWorld(
+      worldPoint.x,
+      worldPoint.y,
+      shape.x + shape.width / 2,
+      shape.y + shape.height / 2,
+      shape.width,
+      shape.height,
+      shape.rotation,
+      worldPadding
+    );
+  }
+
+  if (shape.type === "socket" || shape.type === "switch") {
+    return pointInRotatedRectWorld(
+      worldPoint.x,
+      worldPoint.y,
+      shape.x,
+      shape.y,
+      shape.width,
+      shape.height,
+      shape.rotation,
+      worldPadding
+    );
+  }
+
+  if (shape.type === "circle") {
+    return distance(worldPoint.x, worldPoint.y, shape.x, shape.y) <= shape.radius + worldPadding;
+  }
+
+  if (shape.type === "line" || shape.type === "cable") {
+    const a = projectWorldToScreen(shape.x, shape.y, camera);
+    const b = projectWorldToScreen(shape.x2, shape.y2, camera);
+    return distancePointToSegment(screenPoint.x, screenPoint.y, a.x, a.y, b.x, b.y) <= 12;
+  }
+
+  return false;
+}
+
 function isPointOnShape(px: number, py: number, shape: Shape) {
   if (shape.type === "rectangle" || shape.type === "cad") {
-    return px >= shape.x && px <= shape.x + shape.width && py >= shape.y && py <= shape.y + shape.height;
+    return pointInRotatedRectWorld(
+      px,
+      py,
+      shape.x + shape.width / 2,
+      shape.y + shape.height / 2,
+      shape.width,
+      shape.height,
+      shape.rotation
+    );
   }
 
   if (shape.type === "circle") {
@@ -3706,11 +3898,14 @@ function isPointOnShape(px: number, py: number, shape: Shape) {
   }
 
   if (shape.type === "socket" || shape.type === "switch") {
-    return (
-      px >= shape.x - shape.width / 2 &&
-      px <= shape.x + shape.width / 2 &&
-      py >= shape.y - shape.height / 2 &&
-      py <= shape.y + shape.height / 2
+    return pointInRotatedRectWorld(
+      px,
+      py,
+      shape.x,
+      shape.y,
+      shape.width,
+      shape.height,
+      shape.rotation
     );
   }
 
