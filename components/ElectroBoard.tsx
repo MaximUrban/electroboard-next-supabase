@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { getProjectById, saveProject } from "@/lib/projects";
 
 type Tool =
   | "select"
@@ -124,116 +126,11 @@ const defaultStyle: ShapeStyle = {
   opacity: 0.18,
   rotation: 0,
 };
-function rotatePoint(px: number, py: number, cx: number, cy: number, angleDegValue: number) {
-  const angle = (angleDegValue * Math.PI) / 180;
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
 
-  const dx = px - cx;
-  const dy = py - cy;
-
-  return {
-    x: cx + dx * cos - dy * sin,
-    y: cy + dx * sin + dy * cos,
-  };
-}
-
-function getShapeCenter(shape: Shape) {
-  if (shape.type === "rectangle") {
-    return { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 };
-  }
-
-  if (shape.type === "circle") {
-    return { x: shape.x, y: shape.y };
-  }
-
-  if (shape.type === "socket" || shape.type === "switch") {
-    return { x: shape.x, y: shape.y };
-  }
-
-  if (shape.type === "line" || shape.type === "cable") {
-    return { x: (shape.x + shape.x2) / 2, y: (shape.y + shape.y2) / 2 };
-  }
-
-  return { x: 0, y: 0 };
-}
-
-function orthogonalSnap(from: { x: number; y: number }, to: { x: number; y: number }, tolerance = 2) {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-
-  if (Math.abs(dx) <= tolerance) {
-    return { x: from.x, y: to.y };
-  }
-
-  if (Math.abs(dy) <= tolerance) {
-    return { x: to.x, y: from.y };
-  }
-
-  return to;
-}
-
-function getSelectionGeometry(shape: RectangleShape | SocketShape | SwitchShape) {
-  if (shape.type === "rectangle") {
-    const cx = shape.x + shape.width / 2;
-    const cy = shape.y + shape.height / 2;
-
-    const resizeHandle = rotatePoint(
-      shape.x + shape.width,
-      shape.y + shape.height,
-      cx,
-      cy,
-      shape.rotation
-    );
-
-    const topCenter = rotatePoint(
-      shape.x + shape.width / 2,
-      shape.y,
-      cx,
-      cy,
-      shape.rotation
-    );
-
-    const rotateHandle = rotatePoint(topCenter.x, topCenter.y - 28, topCenter.x, topCenter.y, shape.rotation);
-
-    return {
-      center: { x: cx, y: cy },
-      resizeHandle,
-      rotateHandle,
-    };
-  }
-
-  const cx = shape.x;
-  const cy = shape.y;
-
-  const resizeHandle = rotatePoint(
-    shape.x + shape.width / 2,
-    shape.y + shape.height / 2,
-    cx,
-    cy,
-    shape.rotation
-  );
-
-  const topCenter = rotatePoint(
-    shape.x,
-    shape.y - shape.height / 2,
-    cx,
-    cy,
-    shape.rotation
-  );
-
-  const rotateHandle = rotatePoint(topCenter.x, topCenter.y - 28, topCenter.x, topCenter.y, shape.rotation);
-
-  return {
-    center: { x: cx, y: cy },
-    resizeHandle,
-    rotateHandle,
-  };
-}
-export default function ElectroBoard() {
+export default function ElectroBoard({ projectId }: { projectId: string }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
 
-  const [projectName, setProjectName] = useState("Новый проект");
+  const [projectName, setProjectName] = useState("Project");
   const [tool, setTool] = useState<Tool>("select");
   const [shapes, setShapes] = useState<Shape[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -243,7 +140,9 @@ export default function ElectroBoard() {
   const [metersPerPixel, setMetersPerPixel] = useState<number>(0);
   const [calibrationDistanceMeters, setCalibrationDistanceMeters] = useState("1");
   const [status, setStatus] = useState("Готово");
-  const [showStyleModal, setShowStyleModal] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [savingPulse, setSavingPulse] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [canvasSize] = useState({ width: 1400, height: 900 });
 
   const selectedShape = useMemo(
@@ -255,6 +154,65 @@ export default function ElectroBoard() {
     () => buildEstimate(shapes, metersPerPixel),
     [shapes, metersPerPixel]
   );
+
+  useEffect(() => {
+    const saved = getProjectById(projectId);
+
+    if (saved) {
+      setProjectName(saved.name || "Project");
+      setShapes(saved.data?.shapes || []);
+      setMetersPerPixel(saved.data?.metersPerPixel || 0);
+      setCalibrationPoints(saved.data?.calibrationPoints || []);
+    }
+
+    setLoaded(true);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!loaded) return;
+
+    const timer = window.setInterval(() => {
+      persistProject();
+    }, 20000);
+
+    return () => window.clearInterval(timer);
+  }, [loaded, projectId, projectName, shapes, metersPerPixel, calibrationPoints]);
+
+  useEffect(() => {
+    if (!loaded) return;
+
+    const onBeforeUnload = () => {
+      persistProject(false);
+    };
+
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [loaded, projectId, projectName, shapes, metersPerPixel, calibrationPoints]);
+
+  function persistProject(showPulse = true) {
+    const existing = getProjectById(projectId);
+    const now = Date.now();
+
+    saveProject({
+      id: projectId,
+      name: projectName,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      data: {
+        shapes,
+        metersPerPixel,
+        calibrationPoints,
+      },
+    });
+
+    setLastSavedAt(now);
+    setStatus("Автосохранено");
+
+    if (showPulse) {
+      setSavingPulse(true);
+      window.setTimeout(() => setSavingPulse(false), 900);
+    }
+  }
 
   function getSvgPoint(clientX: number, clientY: number) {
     const svg = svgRef.current;
@@ -305,7 +263,6 @@ export default function ElectroBoard() {
       const hit = [...shapes].reverse().find((shape) => isPointOnShape(point.x, point.y, shape));
       if (hit) {
         setSelectedId(hit.id);
-        setShowStyleModal(false);
         setInteraction({
           mode: "move",
           shapeId: hit.id,
@@ -316,7 +273,6 @@ export default function ElectroBoard() {
       }
 
       setSelectedId(null);
-      setShowStyleModal(false);
       setInteraction(null);
       return;
     }
@@ -418,7 +374,8 @@ export default function ElectroBoard() {
     const point = getSvgPoint(e.clientX, e.clientY);
 
     if (draftLine) {
-      setDraftLine((prev) => (prev ? { ...prev, x2: point.x, y2: point.y } : null));
+      const snapped = orthogonalSnap({ x: draftLine.x, y: draftLine.y }, point, 2);
+      setDraftLine((prev) => (prev ? { ...prev, x2: snapped.x, y2: snapped.y } : null));
       return;
     }
 
@@ -434,7 +391,7 @@ export default function ElectroBoard() {
 
   function handleCanvasMouseUp() {
     if (draftLine) {
-      setShapes((prev) => [...prev, draftLine!]);
+      setShapes((prev) => [...prev, draftLine]);
       setDraftLine(null);
       setTool("select");
       return;
@@ -487,7 +444,6 @@ export default function ElectroBoard() {
     if (!selectedId) return;
     setShapes((prev) => prev.filter((s) => s.id !== selectedId));
     setSelectedId(null);
-    setShowStyleModal(false);
   }
 
   function clearAll() {
@@ -496,7 +452,6 @@ export default function ElectroBoard() {
     setDraftLine(null);
     setCalibrationPoints([]);
     setInteraction(null);
-    setShowStyleModal(false);
     setStatus("Холст очищен");
   }
 
@@ -504,11 +459,18 @@ export default function ElectroBoard() {
     <div style={styles.page}>
       <div style={styles.topbar}>
         <div style={styles.leftBlock}>
+          <Link href="/" style={styles.backLink}>
+            ← Ко всем проектам
+          </Link>
+
           <input
             value={projectName}
             onChange={(e) => setProjectName(e.target.value)}
             style={styles.projectInput}
           />
+        </div>
+
+        <div style={styles.leftBlock}>
           <button style={tool === "select" ? styles.btnActive : styles.btn} onClick={() => setTool("select")}>Выбор</button>
           <button style={tool === "rectangle" ? styles.btnActive : styles.btn} onClick={() => setTool("rectangle")}>Прямоугольник</button>
           <button style={tool === "circle" ? styles.btnActive : styles.btn} onClick={() => setTool("circle")}>Окружность</button>
@@ -518,19 +480,15 @@ export default function ElectroBoard() {
           <button style={tool === "switch" ? styles.btnActive : styles.btn} onClick={() => setTool("switch")}>Выключатель</button>
           <button style={tool === "calibrate" ? styles.btnActive : styles.btn} onClick={() => setTool("calibrate")}>Масштаб</button>
         </div>
-
-        <div style={styles.leftBlock}>
-          <button style={selectedShape ? styles.btn : styles.btnDisabled} disabled={!selectedShape} onClick={() => setShowStyleModal((v) => !v)}>Стиль</button>
-          <button style={styles.btnDanger} onClick={deleteSelected}>Удалить</button>
-          <button style={styles.btnDanger} onClick={clearAll}>Очистить</button>
-        </div>
       </div>
 
       <div style={styles.main}>
         <div style={styles.canvasWrap}>
           <div style={styles.statusBar}>
             <span>{status}</span>
-            <span>Масштаб: {metersPerPixel > 0 ? `${metersPerPixel.toFixed(5)} м / px` : "не задан"}</span>
+            <span>
+              Масштаб: {metersPerPixel > 0 ? `${metersPerPixel.toFixed(5)} м / px` : "не задан"}
+            </span>
           </div>
 
           <div style={styles.board}>
@@ -548,6 +506,7 @@ export default function ElectroBoard() {
                   <path d="M 25 0 L 0 0 0 25" fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="1" />
                 </pattern>
               </defs>
+
               <rect x="0" y="0" width={canvasSize.width} height={canvasSize.height} fill="url(#grid)" />
 
               {shapes.map((shape) => (
@@ -562,7 +521,9 @@ export default function ElectroBoard() {
               {calibrationPoints.map((p, i) => (
                 <g key={`${p.x}-${p.y}-${i}`}>
                   <circle cx={p.x} cy={p.y} r="6" fill="#00e7a7" />
-                  <text x={p.x + 8} y={p.y - 8} fill="#fff" fontSize="14">T{i + 1}</text>
+                  <text x={p.x + 8} y={p.y - 8} fill="#fff" fontSize="14">
+                    T{i + 1}
+                  </text>
                 </g>
               ))}
 
@@ -577,10 +538,67 @@ export default function ElectroBoard() {
                 />
               ) : null}
             </svg>
+          </div>
+        </div>
 
-            {showStyleModal && selectedShape ? (
-              <div style={styles.styleModal}>
-                <div style={styles.modalTitle}>Стиль объекта</div>
+        <div style={styles.sidebar}>
+          <div style={styles.card}>
+            <div style={styles.cardTitle}>Калибровка</div>
+            <div style={styles.field}>
+              <label style={styles.label}>Реальное расстояние, м</label>
+              <input
+                value={calibrationDistanceMeters}
+                onChange={(e) => setCalibrationDistanceMeters(e.target.value)}
+                style={styles.input}
+                type="number"
+                step="0.01"
+              />
+            </div>
+            <div style={styles.hint}>
+              Выберите <b>Масштаб</b> и нажмите две точки.
+            </div>
+          </div>
+
+          <div style={styles.card}>
+            <div style={styles.cardTitle}>Свойства объекта</div>
+
+            {!selectedShape ? (
+              <div style={styles.hint}>Ничего не выбрано</div>
+            ) : (
+              <>
+                <div style={styles.field}>
+                  <label style={styles.label}>Тип</label>
+                  <input value={selectedShape.type} readOnly style={styles.input} />
+                </div>
+
+                <div style={styles.field}>
+                  <label style={styles.label}>Название</label>
+                  <input
+                    value={selectedShape.label}
+                    onChange={(e) => setShapePatch(selectedShape.id, { label: e.target.value })}
+                    style={styles.input}
+                  />
+                </div>
+
+                <div style={styles.field}>
+                  <label style={styles.label}>Группа</label>
+                  <input
+                    value={selectedShape.groupName || ""}
+                    onChange={(e) => setShapePatch(selectedShape.id, { groupName: e.target.value })}
+                    style={styles.input}
+                  />
+                </div>
+
+                {(selectedShape.type === "line" || selectedShape.type === "cable") && (
+                  <div style={styles.field}>
+                    <label style={styles.label}>Тип кабеля</label>
+                    <input
+                      value={selectedShape.cableType || ""}
+                      onChange={(e) => setShapePatch(selectedShape.id, { cableType: e.target.value })}
+                      style={styles.input}
+                    />
+                  </div>
+                )}
 
                 <div style={styles.field}>
                   <label style={styles.label}>Цвет линии</label>
@@ -605,7 +623,7 @@ export default function ElectroBoard() {
                 ) : null}
 
                 <div style={styles.field}>
-                  <label style={styles.label}>Толщина линии: {selectedShape.strokeWidth}</label>
+                  <label style={styles.label}>Толщина: {selectedShape.strokeWidth}</label>
                   <input
                     type="range"
                     min={1}
@@ -656,71 +674,15 @@ export default function ElectroBoard() {
                   </div>
                 ) : null}
 
-                <button style={styles.btn} onClick={() => setShowStyleModal(false)}>Закрыть</button>
-              </div>
-            ) : null}
-          </div>
-        </div>
+                {(selectedShape.type === "line" || selectedShape.type === "cable") && (
+                  <div style={styles.hint}>
+                    Длина: {lineLengthMeters(selectedShape, metersPerPixel).toFixed(2)} м
+                  </div>
+                )}
 
-        <div style={styles.sidebar}>
-          <div style={styles.card}>
-            <div style={styles.cardTitle}>Калибровка</div>
-            <div style={styles.field}>
-              <label style={styles.label}>Реальное расстояние, м</label>
-              <input
-                value={calibrationDistanceMeters}
-                onChange={(e) => setCalibrationDistanceMeters(e.target.value)}
-                style={styles.input}
-                type="number"
-                step="0.01"
-              />
-            </div>
-            <div style={styles.hint}>Выберите инструмент <b>Масштаб</b>, затем кликните по двум точкам.</div>
-          </div>
-
-          <div style={styles.card}>
-            <div style={styles.cardTitle}>Свойства объекта</div>
-
-            {!selectedShape ? (
-              <div style={styles.hint}>Ничего не выбрано</div>
-            ) : (
-              <>
-                <div style={styles.field}>
-                  <label style={styles.label}>Тип</label>
-                  <input value={selectedShape.type} readOnly style={styles.input} />
-                </div>
-                <div style={styles.field}>
-                  <label style={styles.label}>Название</label>
-                  <input
-                    value={selectedShape.label}
-                    onChange={(e) => setShapePatch(selectedShape.id, { label: e.target.value })}
-                    style={styles.input}
-                  />
-                </div>
-                <div style={styles.field}>
-                  <label style={styles.label}>Группа</label>
-                  <input
-                    value={selectedShape.groupName || ""}
-                    onChange={(e) => setShapePatch(selectedShape.id, { groupName: e.target.value })}
-                    style={styles.input}
-                  />
-                </div>
-
-                {(selectedShape.type === "line" || selectedShape.type === "cable") ? (
-                  <>
-                    <div style={styles.field}>
-                      <label style={styles.label}>Тип кабеля</label>
-                      <input
-                        value={selectedShape.cableType || ""}
-                        onChange={(e) => setShapePatch(selectedShape.id, { cableType: e.target.value })}
-                        style={styles.input}
-                      />
-                    </div>
-                    <div style={styles.hint}>
-                      Длина: {lineLengthMeters(selectedShape, metersPerPixel).toFixed(2)} м
-                    </div>
-                  </>
-                ) : null}
+                <button style={styles.deleteBtn} onClick={deleteSelected}>
+                  Удалить объект
+                </button>
               </>
             )}
           </div>
@@ -741,7 +703,24 @@ export default function ElectroBoard() {
               </div>
             )}
           </div>
+
+          <button style={styles.clearBtn} onClick={clearAll}>
+            Очистить проект
+          </button>
         </div>
+      </div>
+
+      <div style={styles.saveBadge}>
+        <div
+          style={{
+            ...styles.saveDot,
+            transform: savingPulse ? "scale(1.25)" : "scale(1)",
+            opacity: savingPulse ? 1 : 0.65,
+          }}
+        />
+        <span style={styles.saveText}>
+          {lastSavedAt ? `Автосохранение` : `Ожидание`}
+        </span>
       </div>
     </div>
   );
@@ -845,7 +824,6 @@ function renderSelectionOverlay(shape: Shape) {
   if (shape.type === "line" || shape.type === "cable") {
     const midX = (shape.x + shape.x2) / 2;
     const midY = (shape.y + shape.y2) / 2;
-
     return (
       <g>
         <circle cx={shape.x} cy={shape.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" />
@@ -860,23 +838,17 @@ function renderSelectionOverlay(shape: Shape) {
   if (shape.type === "circle") {
     return (
       <g>
-        {anchors.map((a) => (
-          <circle key={a.id} cx={a.x} cy={a.y} r="4" fill="#9ec1ff" stroke="#fff" strokeWidth="1.5" />
-        ))}
+        {anchors.map((a) => <circle key={a.id} cx={a.x} cy={a.y} r="4" fill="#9ec1ff" stroke="#fff" strokeWidth="1.5" />)}
         <circle cx={shape.x + shape.radius} cy={shape.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" />
       </g>
     );
   }
 
   if (shape.type === "rectangle" || shape.type === "socket" || shape.type === "switch") {
-    const anchors = getShapeAnchors(shape);
     const geometry = getSelectionGeometry(shape);
-
     return (
       <g>
-        {anchors.map((a) => (
-          <circle key={a.id} cx={a.x} cy={a.y} r="4" fill="#9ec1ff" stroke="#fff" strokeWidth="1.5" />
-        ))}
+        {anchors.map((a) => <circle key={a.id} cx={a.x} cy={a.y} r="4" fill="#9ec1ff" stroke="#fff" strokeWidth="1.5" />)}
         <line
           x1={geometry.center.x}
           y1={geometry.center.y}
@@ -886,22 +858,8 @@ function renderSelectionOverlay(shape: Shape) {
           strokeWidth="2"
           opacity="0.7"
         />
-        <circle
-          cx={geometry.resizeHandle.x}
-          cy={geometry.resizeHandle.y}
-          r="8"
-          fill="#fff"
-          stroke="#3d63ff"
-          strokeWidth="3"
-        />
-        <circle
-          cx={geometry.rotateHandle.x}
-          cy={geometry.rotateHandle.y}
-          r="8"
-          fill="#fff"
-          stroke="#3d63ff"
-          strokeWidth="3"
-        />
+        <circle cx={geometry.resizeHandle.x} cy={geometry.resizeHandle.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" />
+        <circle cx={geometry.rotateHandle.x} cy={geometry.rotateHandle.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" />
       </g>
     );
   }
@@ -917,73 +875,42 @@ function transformShape(shape: Shape, interaction: InteractionState, point: { x:
   if (interaction.mode === "move") {
     if (shape.type === "line" || shape.type === "cable") {
       const s = initial as LineShape;
-      return {
-        ...shape,
-        x: s.x + dx,
-        y: s.y + dy,
-        x2: s.x2 + dx,
-        y2: s.y2 + dy,
-      };
+      return { ...shape, x: s.x + dx, y: s.y + dy, x2: s.x2 + dx, y2: s.y2 + dy };
     }
-
     if (shape.type === "circle") {
       const s = initial as CircleShape;
       return { ...shape, x: s.x + dx, y: s.y + dy };
     }
-
     if (shape.type === "rectangle") {
       const s = initial as RectangleShape;
       return { ...shape, x: s.x + dx, y: s.y + dy };
     }
-
     const s = initial as SocketShape | SwitchShape;
     return { ...shape, x: s.x + dx, y: s.y + dy };
   }
 
   if (interaction.mode === "line-start" && (shape.type === "line" || shape.type === "cable")) {
     const snapped = orthogonalSnap({ x: shape.x2, y: shape.y2 }, point, 2);
-    return {
-      ...shape,
-      x: snapped.x,
-      y: snapped.y,
-      startAttachment: undefined,
-    };
+    return { ...shape, x: snapped.x, y: snapped.y, startAttachment: undefined };
   }
 
   if (interaction.mode === "line-end" && (shape.type === "line" || shape.type === "cable")) {
     const snapped = orthogonalSnap({ x: shape.x, y: shape.y }, point, 2);
-    return {
-      ...shape,
-      x2: snapped.x,
-      y2: snapped.y,
-      endAttachment: undefined,
-    };
+    return { ...shape, x2: snapped.x, y2: snapped.y, endAttachment: undefined };
   }
 
   if (interaction.mode === "resize-circle" && shape.type === "circle") {
-    return {
-      ...shape,
-      radius: Math.max(10, distance(shape.x, shape.y, point.x, point.y)),
-    };
+    return { ...shape, radius: Math.max(10, distance(shape.x, shape.y, point.x, point.y)) };
   }
 
   if (interaction.mode === "resize-se") {
     if (shape.type === "rectangle") {
       const s = initial as RectangleShape;
-      return {
-        ...shape,
-        width: Math.max(20, s.width + dx),
-        height: Math.max(20, s.height + dy),
-      };
+      return { ...shape, width: Math.max(20, s.width + dx), height: Math.max(20, s.height + dy) };
     }
-
     if (shape.type === "socket" || shape.type === "switch") {
       const s = initial as SocketShape | SwitchShape;
-      return {
-        ...shape,
-        width: Math.max(16, s.width + dx),
-        height: Math.max(16, s.height + dy),
-      };
+      return { ...shape, width: Math.max(16, s.width + dx), height: Math.max(16, s.height + dy) };
     }
   }
 
@@ -992,18 +919,11 @@ function transformShape(shape: Shape, interaction: InteractionState, point: { x:
       const s = initial as RectangleShape;
       const cx = s.x + s.width / 2;
       const cy = s.y + s.height / 2;
-      return {
-        ...shape,
-        rotation: angleDeg(cx, cy, point.x, point.y) + 90,
-      };
+      return { ...shape, rotation: angleDeg(cx, cy, point.x, point.y) + 90 };
     }
-
     if (shape.type === "socket" || shape.type === "switch") {
       const s = initial as SocketShape | SwitchShape;
-      return {
-        ...shape,
-        rotation: angleDeg(s.x, s.y, point.x, point.y) + 90,
-      };
+      return { ...shape, rotation: angleDeg(s.x, s.y, point.x, point.y) + 90 };
     }
   }
 
@@ -1014,7 +934,6 @@ function hitTestHandle(px: number, py: number, shape: Shape): HandleType | null 
   if (shape.type === "line" || shape.type === "cable") {
     const midX = (shape.x + shape.x2) / 2;
     const midY = (shape.y + shape.y2) / 2;
-
     if (distance(px, py, shape.x, shape.y) <= 12) return "line-start";
     if (distance(px, py, shape.x2, shape.y2) <= 12) return "line-end";
     if (distance(px, py, midX, midY) <= 12) return "move";
@@ -1028,7 +947,6 @@ function hitTestHandle(px: number, py: number, shape: Shape): HandleType | null 
 
   if (shape.type === "rectangle" || shape.type === "socket" || shape.type === "switch") {
     const geometry = getSelectionGeometry(shape);
-
     if (distance(px, py, geometry.rotateHandle.x, geometry.rotateHandle.y) <= 12) return "rotate";
     if (distance(px, py, geometry.resizeHandle.x, geometry.resizeHandle.y) <= 12) return "resize-se";
   }
@@ -1036,26 +954,53 @@ function hitTestHandle(px: number, py: number, shape: Shape): HandleType | null 
   return null;
 }
 
-function getSelectionBox(shape: RectangleShape | SocketShape | SwitchShape) {
-  if (shape.type === "rectangle") {
-    return {
-      x: shape.x,
-      y: shape.y,
-      width: shape.width,
-      height: shape.height,
-      cx: shape.x + shape.width / 2,
-      cy: shape.y + shape.height / 2,
-    };
-  }
+function rotatePoint(px: number, py: number, cx: number, cy: number, angleDegValue: number) {
+  const angle = (angleDegValue * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+
+  const dx = px - cx;
+  const dy = py - cy;
 
   return {
-    x: shape.x - shape.width / 2,
-    y: shape.y - shape.height / 2,
-    width: shape.width,
-    height: shape.height,
-    cx: shape.x,
-    cy: shape.y,
+    x: cx + dx * cos - dy * sin,
+    y: cy + dx * sin + dy * cos,
   };
+}
+
+function angleDeg(cx: number, cy: number, px: number, py: number) {
+  return (Math.atan2(py - cy, px - cx) * 180) / Math.PI;
+}
+
+function orthogonalSnap(from: { x: number; y: number }, to: { x: number; y: number }, tolerance = 2) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+
+  if (Math.abs(dx) <= tolerance) return { x: from.x, y: to.y };
+  if (Math.abs(dy) <= tolerance) return { x: to.x, y: from.y };
+
+  return to;
+}
+
+function getSelectionGeometry(shape: RectangleShape | SocketShape | SwitchShape) {
+  if (shape.type === "rectangle") {
+    const cx = shape.x + shape.width / 2;
+    const cy = shape.y + shape.height / 2;
+
+    const resizeHandle = rotatePoint(shape.x + shape.width, shape.y + shape.height, cx, cy, shape.rotation);
+    const topCenter = rotatePoint(shape.x + shape.width / 2, shape.y, cx, cy, shape.rotation);
+    const rotateHandle = rotatePoint(topCenter.x, topCenter.y - 28, topCenter.x, topCenter.y, shape.rotation);
+
+    return { center: { x: cx, y: cy }, resizeHandle, rotateHandle };
+  }
+
+  const cx = shape.x;
+  const cy = shape.y;
+  const resizeHandle = rotatePoint(shape.x + shape.width / 2, shape.y + shape.height / 2, cx, cy, shape.rotation);
+  const topCenter = rotatePoint(shape.x, shape.y - shape.height / 2, cx, cy, shape.rotation);
+  const rotateHandle = rotatePoint(topCenter.x, topCenter.y - 28, topCenter.x, topCenter.y, shape.rotation);
+
+  return { center: { x: cx, y: cy }, resizeHandle, rotateHandle };
 }
 
 function getShapeAnchors(shape: Shape): AnchorPoint[] {
@@ -1084,12 +1029,7 @@ function getShapeAnchors(shape: Shape): AnchorPoint[] {
     ];
 
     return raw.map((a) =>
-      a.id === "center"
-        ? a
-        : {
-            id: a.id,
-            ...rotatePoint(a.x, a.y, cx, cy, shape.rotation),
-          }
+      a.id === "center" ? a : { id: a.id, ...rotatePoint(a.x, a.y, cx, cy, shape.rotation) }
     );
   }
 
@@ -1106,16 +1046,16 @@ function getShapeAnchors(shape: Shape): AnchorPoint[] {
     ];
 
     return raw.map((a) =>
-      a.id === "center"
-        ? a
-        : {
-            id: a.id,
-            ...rotatePoint(a.x, a.y, cx, cy, shape.rotation),
-          }
+      a.id === "center" ? a : { id: a.id, ...rotatePoint(a.x, a.y, cx, cy, shape.rotation) }
     );
   }
 
   return [];
+}
+
+function getAnchorPosition(shape: Shape, anchorId: string) {
+  const anchor = getShapeAnchors(shape).find((a) => a.id === anchorId);
+  return anchor ? { x: anchor.x, y: anchor.y } : null;
 }
 
 function findClosestAnchor(
@@ -1141,11 +1081,6 @@ function findClosestAnchor(
   }
 
   return best;
-}
-
-function getAnchorPosition(shape: Shape, anchorId: string) {
-  const anchor = getShapeAnchors(shape).find((a) => a.id === anchorId);
-  return anchor ? { x: anchor.x, y: anchor.y } : null;
 }
 
 function applyAttachments(shapes: Shape[]): Shape[] {
@@ -1232,10 +1167,6 @@ function distance(x1: number, y1: number, x2: number, y2: number) {
   return Math.hypot(x2 - x1, y2 - y1);
 }
 
-function angleDeg(cx: number, cy: number, px: number, py: number) {
-  return (Math.atan2(py - cy, px - cx) * 180) / Math.PI;
-}
-
 function distancePointToSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number) {
   const dx = x2 - x1;
   const dy = y2 - y1;
@@ -1272,15 +1203,15 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: "100vh",
     background: "#0b1020",
     color: "#f2f6ff",
-    padding: 16,
+    padding: 14,
     boxSizing: "border-box",
     fontFamily: "Inter, Arial, sans-serif",
   },
   topbar: {
     display: "flex",
     justifyContent: "space-between",
-    gap: 12,
-    marginBottom: 16,
+    gap: 10,
+    marginBottom: 12,
     flexWrap: "wrap",
   },
   leftBlock: {
@@ -1288,6 +1219,14 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 8,
     flexWrap: "wrap",
     alignItems: "center",
+  },
+  backLink: {
+    color: "#d6e2ff",
+    textDecoration: "none",
+    background: "#121937",
+    border: "1px solid #26305b",
+    borderRadius: 10,
+    padding: "10px 12px",
   },
   projectInput: {
     background: "#121937",
@@ -1313,26 +1252,10 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "10px 12px",
     cursor: "pointer",
   },
-  btnDanger: {
-    background: "#4a1d24",
-    color: "#fff",
-    border: "1px solid #8a3f4d",
-    borderRadius: 10,
-    padding: "10px 12px",
-    cursor: "pointer",
-  },
-  btnDisabled: {
-    background: "#151b33",
-    color: "#68749b",
-    border: "1px solid #2a3153",
-    borderRadius: 10,
-    padding: "10px 12px",
-    cursor: "not-allowed",
-  },
   main: {
     display: "grid",
-    gridTemplateColumns: "1fr 340px",
-    gap: 16,
+    gridTemplateColumns: "1fr 285px",
+    gap: 12,
   },
   canvasWrap: {
     minWidth: 0,
@@ -1345,7 +1268,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #26305b",
     borderRadius: 12,
     padding: "10px 12px",
-    marginBottom: 12,
+    marginBottom: 10,
     flexWrap: "wrap",
   },
   board: {
@@ -1366,27 +1289,27 @@ const styles: Record<string, React.CSSProperties> = {
   },
   sidebar: {
     display: "grid",
-    gap: 16,
+    gap: 10,
     alignContent: "start",
   },
   card: {
     background: "#121937",
     border: "1px solid #26305b",
     borderRadius: 14,
-    padding: 14,
+    padding: 12,
   },
   cardTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 700,
-    marginBottom: 12,
+    marginBottom: 10,
   },
   field: {
     display: "grid",
-    gap: 6,
-    marginBottom: 10,
+    gap: 5,
+    marginBottom: 8,
   },
   label: {
-    fontSize: 13,
+    fontSize: 12,
     color: "#b9c7ef",
   },
   input: {
@@ -1394,14 +1317,14 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#fff",
     border: "1px solid #2a376f",
     borderRadius: 10,
-    padding: "10px 12px",
+    padding: "9px 10px",
     width: "100%",
     boxSizing: "border-box",
   },
   hint: {
     color: "#b9c7ef",
-    fontSize: 13,
-    lineHeight: 1.5,
+    fontSize: 12,
+    lineHeight: 1.45,
   },
   estimateRow: {
     display: "grid",
@@ -1409,31 +1332,56 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#0c1330",
     border: "1px solid #26305b",
     borderRadius: 10,
-    padding: 10,
-  },
-  styleModal: {
-    position: "absolute",
-    top: 20,
-    right: 20,
-    width: 280,
-    background: "#121937",
-    border: "1px solid #33407a",
-    borderRadius: 14,
-    padding: 14,
-    zIndex: 30,
-    boxShadow: "0 10px 30px rgba(0,0,0,.35)",
-  },
-  modalTitle: {
-    fontSize: 16,
-    fontWeight: 700,
-    marginBottom: 10,
+    padding: 9,
   },
   colorInput: {
     width: "100%",
-    height: 42,
+    height: 38,
     background: "#0c1330",
     border: "1px solid #2a376f",
     borderRadius: 10,
     padding: 4,
+  },
+  deleteBtn: {
+    background: "#4a1d24",
+    color: "#fff",
+    border: "1px solid #8a3f4d",
+    borderRadius: 10,
+    padding: "10px 12px",
+    cursor: "pointer",
+    width: "100%",
+  },
+  clearBtn: {
+    background: "#4a1d24",
+    color: "#fff",
+    border: "1px solid #8a3f4d",
+    borderRadius: 10,
+    padding: "12px 14px",
+    cursor: "pointer",
+  },
+  saveBadge: {
+    position: "fixed",
+    right: 18,
+    bottom: 18,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    background: "rgba(12,19,48,.92)",
+    border: "1px solid #2a376f",
+    borderRadius: 999,
+    padding: "8px 12px",
+    zIndex: 100,
+    boxShadow: "0 8px 24px rgba(0,0,0,.3)",
+  },
+  saveDot: {
+    width: 10,
+    height: 10,
+    borderRadius: "50%",
+    background: "#00e7a7",
+    transition: "all .35s ease",
+  },
+  saveText: {
+    fontSize: 12,
+    color: "#dce7ff",
   },
 };
