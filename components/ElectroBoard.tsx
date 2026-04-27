@@ -2861,69 +2861,7 @@ function hitTestHandleScreen(
 
   return null;
 }
-  function hitTestHandleScreen_DELETE_ME(
-  screenPoint: { x: number; y: number },
-  shape: Shape,
-  camera: CameraState
-): HandleType | null {
-  const cornerRadiusPx = 20;
-  const sideRadiusPx = 18;
-  const rotateRadiusPx = 18;
-  const lineEndRadiusPx = 16;
-  const lineMidRadiusPx = 18;
-
-  const distToWorldPoint = (worldX: number, worldY: number) => {
-  const screenX = camera.x + worldX * camera.zoom;
-  const screenY = camera.y + worldY * camera.zoom;
-  return distance(screenPoint.x, screenPoint.y, screenX, screenY);
-};
-
-  if (shape.type === "line" || shape.type === "cable") {
-    const midX = (shape.x + shape.x2) / 2;
-    const midY = (shape.y + shape.y2) / 2;
-
-    if (distToWorldPoint(shape.x, shape.y) <= lineEndRadiusPx) return "line-start";
-    if (distToWorldPoint(shape.x2, shape.y2) <= lineEndRadiusPx) return "line-end";
-    if (distToWorldPoint(midX, midY) <= lineMidRadiusPx) return "move";
-
-    return null;
-  }
-
-  if (shape.type === "circle") {
-    if (distToWorldPoint(shape.x + shape.radius, shape.y) <= cornerRadiusPx) {
-      return "resize-circle";
-    }
-    return null;
-  }
-
-  if (
-    shape.type === "rectangle" ||
-    shape.type === "socket" ||
-    shape.type === "switch" ||
-    shape.type === "cad"
-  ) {
-    const geometry = getSelectionGeometry(shape);
-
-    if (
-      distToWorldPoint(geometry.rotateHandle.x, geometry.rotateHandle.y) <=
-      rotateRadiusPx
-    ) {
-      return "rotate";
-    }
-
-    if (distToWorldPoint(geometry.corners.nw.x, geometry.corners.nw.y) <= cornerRadiusPx) return "resize-nw";
-    if (distToWorldPoint(geometry.corners.ne.x, geometry.corners.ne.y) <= cornerRadiusPx) return "resize-ne";
-    if (distToWorldPoint(geometry.corners.se.x, geometry.corners.se.y) <= cornerRadiusPx) return "resize-se";
-    if (distToWorldPoint(geometry.corners.sw.x, geometry.corners.sw.y) <= cornerRadiusPx) return "resize-sw";
-
-    if (distToWorldPoint(geometry.sides.n.x, geometry.sides.n.y) <= sideRadiusPx) return "resize-n";
-    if (distToWorldPoint(geometry.sides.e.x, geometry.sides.e.y) <= sideRadiusPx) return "resize-e";
-    if (distToWorldPoint(geometry.sides.s.x, geometry.sides.s.y) <= sideRadiusPx) return "resize-s";
-    if (distToWorldPoint(geometry.sides.w.x, geometry.sides.w.y) <= sideRadiusPx) return "resize-w";
-  }
-
-  return null;
-}
+  
 function renderSelectionOverlayScreen(shape: Shape, camera: CameraState) {
   const mainR = 10;
   const sideR = 8;
