@@ -2060,8 +2060,8 @@ function renderShape(shape: Shape, selected: boolean, cadAssets: CadAsset[]) {
         width={shape.width}
         height={shape.height}
         rx="10"
-        fill="rgba(255,255,255,0.02)"
-        stroke={selected ? "#9ec1ff" : "rgba(255,255,255,0.18)"}
+        fill="rgba(255,255,255,0.01)"
+        stroke={selected ? "#9ec1ff" : "rgba(255,255,255,0.14)"}
         strokeWidth={selected ? 2 : 1}
       />
 
@@ -2073,7 +2073,8 @@ function renderShape(shape: Shape, selected: boolean, cadAssets: CadAsset[]) {
           width={shape.width - 12}
           height={shape.height - 12}
           preserveAspectRatio="xMidYMid meet"
-          opacity={0.28}
+          opacity={0.08}
+          pointerEvents="none"
         />
       ) : null}
 
@@ -2112,8 +2113,11 @@ function renderCadPrimitive(
         y1={primitive.y1}
         x2={primitive.x2}
         y2={primitive.y2}
-        stroke={primitive.stroke || "#dce7ff"}
-        strokeWidth={primitive.strokeWidth || 1}
+        stroke={primitive.stroke || "#eaf1ff"}
+        strokeWidth={Math.max(primitive.strokeWidth || 1, 1.6)}
+        opacity={0.98}
+        vectorEffect="non-scaling-stroke"
+        shapeRendering="geometricPrecision"
       />
     );
   }
@@ -2125,9 +2129,11 @@ function renderCadPrimitive(
         key={key}
         points={points}
         fill={primitive.closed ? primitive.fill || "none" : "none"}
-        stroke={primitive.stroke || "#dce7ff"}
-        strokeWidth={primitive.strokeWidth || 1}
-        {...(primitive.closed ? { polygonRendering: "geometricPrecision" } : {})}
+        stroke={primitive.stroke || "#eaf1ff"}
+        strokeWidth={Math.max(primitive.strokeWidth || 1, 1.6)}
+        opacity={0.98}
+        vectorEffect="non-scaling-stroke"
+        shapeRendering="geometricPrecision"
       />
     );
   }
@@ -2140,8 +2146,11 @@ function renderCadPrimitive(
         cy={primitive.cy}
         r={primitive.r}
         fill={primitive.fill || "none"}
-        stroke={primitive.stroke || "#dce7ff"}
-        strokeWidth={primitive.strokeWidth || 1}
+        stroke={primitive.stroke || "#eaf1ff"}
+        strokeWidth={Math.max(primitive.strokeWidth || 1, 1.6)}
+        opacity={0.98}
+        vectorEffect="non-scaling-stroke"
+        shapeRendering="geometricPrecision"
       />
     );
   }
@@ -2152,8 +2161,9 @@ function renderCadPrimitive(
         key={key}
         x={primitive.x}
         y={primitive.y}
-        fill={primitive.fill || "#f2f6ff"}
-        fontSize={primitive.size || 12}
+        fill={primitive.fill || "#f4f7ff"}
+        fontSize={Math.max(primitive.size || 12, 14)}
+        opacity={0.98}
       >
         {primitive.text}
       </text>
