@@ -2812,9 +2812,10 @@ function getSelectionGeometry(
   const lineMidRadiusPx = 18;
 
   const distToWorldPoint = (worldX: number, worldY: number) => {
-    const p = worldToScreenPoint(worldX, worldY, camera);
-    return distance(screenPoint.x, screenPoint.y, p.x, p.y);
-  };
+  const screenX = camera.x + worldX * camera.zoom;
+  const screenY = camera.y + worldY * camera.zoom;
+  return distance(screenPoint.x, screenPoint.y, screenX, screenY);
+};
 
   if (shape.type === "line" || shape.type === "cable") {
     const midX = (shape.x + shape.x2) / 2;
