@@ -11,6 +11,7 @@ import type {
 } from "@/lib/device-library";
 import type { CadAsset, CadPrimitive } from "@/lib/cad-types";
 import { createMockCadAssetFromDrawing } from "@/lib/cad-mock";
+import { createMockCadAssetFromImportedFile } from "@/lib/cad-import-mock";
 
 type Tool =
   | "select"
@@ -199,6 +200,7 @@ const WORLD_BOUNDS = {
 
 export default function ElectroBoard({ projectId }: { projectId: string }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const [projectName, setProjectName] = useState("Project");
   const [tool, setTool] = useState<Tool>("select");
@@ -711,6 +713,59 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     setShowLibrary(false);
   }
 
+  function importDrawingFile(file: File) {
+  const cadAsset = createMockCadAssetFromImportedFile(file);
+
+  const fitWidth = 900;
+  const scale = fitWidth / Math.max(1, cadAsset.bounds.width);
+  const width = cadAsset.bounds.width * scale;
+  const height = cadAsset.bounds.height * scale;
+
+  const centerWorld = screenToWorld(canvasSize.width / 2, canvasSize.height / 2);
+
+  const layerState = Object.fromEntries(
+    cadAsset.layers.map((layer) => [layer.id, layer.visible])
+  );
+
+  const shape: CadShape = {
+    id: crypto.randomUUID(),
+    type: "cad",
+    x: centerWorld.x - width / 2,
+    y: centerWorld.y - height / 2,
+    width,
+    height,
+    assetId: cadAsset.id,
+    article: file.name,
+    brand: "Imported",
+    series: "Drawing",
+    modules: 0,
+    categoryLabel: "Imported drawing",
+    country: "TR",
+    layerState,
+    label: file.name,
+    groupName: "",
+    cableType: "",
+    ...defaultStyle,
+    fillColor: "#1b2347",
+    opacity: 1,
+  };
+
+  setCadAssets((prevAssets) => {
+    const nextAssets = [...prevAssets, cadAsset];
+
+    setShapes((prevShapes) => {
+      const nextShapes = [...prevShapes, shape];
+      window.setTimeout(() => commitHistory(nextShapes, nextAssets), 0);
+      return nextShapes;
+    });
+
+    return nextAssets;
+  });
+
+  setSelectedId(shape.id);
+  setStatus(`Импортирован чертёж: ${file.name}`);
+}
+
   function handleCanvasMouseDown(e: React.MouseEvent<SVGSVGElement>) {
     const screenPoint = getScreenPoint(e.clientX, e.clientY);
     const point = screenToWorld(screenPoint.x, screenPoint.y);
@@ -1153,6 +1208,26 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
           <button style={styles.btn} onClick={() => setShowLibrary(true)}>
             Библиотека
           </button>
+          <button
+  style={styles.btn}
+  onClick={() => importInputRef.current?.click()}
+>
+  Импорт чертежа
+</button>
+
+<input
+  ref={importInputRef}
+  type="file"
+  accept=".dwg,.dxf,.pdf,.png,.jpg,.jpeg"
+  style={{ display: "none" }}
+  onChange={(e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      importDrawingFile(file);
+    }
+    e.currentTarget.value = "";
+  }}
+/>
 
           <button style={styles.iconBtn} onClick={undo} title="Undo">
             <IconUndo />
@@ -1361,17 +1436,19 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
                     </div>
 
                     <div style={styles.compactField}>
-                      <label style={styles.label}>Источник CAD</label>
-                      <input
-                        value={
-                          selectedCadAsset
-                            ? `${selectedCadAsset.sourceLabel || ""} (${selectedCadAsset.sourceFormat.toUpperCase()})`
-                            : ""
-                        }
-                        readOnly
-                        style={styles.inputCompact}
-                      />
-                    </div>
+  <label style={styles.label}>Источник CAD</label>
+  <input
+    value={
+      selectedCadAsset
+        ? selectedCadAsset.importMode === "drawing-import"
+          ? `${selectedCadAsset.sourceName || "Imported drawing"} (${selectedCadAsset.sourceFormat.toUpperCase()})`
+          : `${selectedCadAsset.sourceLabel || ""} (${selectedCadAsset.sourceFormat.toUpperCase()})`
+        : ""
+    }
+    readOnly
+    style={styles.inputCompact}
+  />
+</div>
                   </>
                 ) : null}
 
