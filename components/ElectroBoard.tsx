@@ -2861,7 +2861,7 @@ function hitTestHandleScreen(
 
   return null;
 }
-  function hitTestHandleScreen(
+  function hitTestHandleScreen_DELETE_ME(
   screenPoint: { x: number; y: number },
   shape: Shape,
   camera: CameraState
