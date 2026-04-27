@@ -238,6 +238,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
 const [canvasSize] = useState({ width: 1400, height: 900 });
   const [canvasCursor, setCanvasCursor] = useState<React.CSSProperties["cursor"]>("grab");
+  const [cadStrokeScale, setCadStrokeScale] = useState(1.8);
 
   const [history, setHistory] = useState<HistoryState[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
