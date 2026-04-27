@@ -161,6 +161,14 @@ type InteractionState = {
   initialShape: Shape;
 };
 
+type PendingInteractionState = {
+  candidateMode: HandleType;
+  shapeId: string;
+  startPointer: { x: number; y: number };
+  startScreen: { x: number; y: number };
+  initialShape: Shape;
+};
+
 type HistoryState = {
   shapes: Shape[];
   cadAssets: CadAsset[];
@@ -221,7 +229,8 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   const [shapes, setShapes] = useState<Shape[]>([]);
   const [cadAssets, setCadAssets] = useState<CadAsset[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [transformModeId, setTransformModeId] = useState<string | null>(null);
+  const [, setTransformModeId] = useState<string | null>(null);
+  const [pendingInteraction, setPendingInteraction] = useState<PendingInteractionState | null>(null);
   const [draftLine, setDraftLine] = useState<LineShape | null>(null);
   const [interaction, setInteraction] = useState<InteractionState | null>(null);
   const [calibrationPoints, setCalibrationPoints] = useState<CalibrationPoint[]>([]);
@@ -519,6 +528,7 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
     setInteraction(null);
     setDraftLine(null);
     setHoverAnchorState(null);
+    setPendingInteraction(null);
     persistProjectData(state, false);
     setStatus("История применена");
   }
@@ -967,19 +977,17 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
     }
 
     if (tool === "select") {
-      if (
-        selectedShape &&
-        !isShapeLocked(selectedShape) &&
-        transformModeId === selectedShape.id
-      ) {
+      if (selectedShape && !isShapeLocked(selectedShape)) {
         const handle = hitTestHandleScreen(screenPoint, selectedShape, camera);
         if (handle) {
-          setInteraction({
-            mode: handle,
+          setPendingInteraction({
+            candidateMode: handle,
             shapeId: selectedShape.id,
             startPointer: point,
+            startScreen: screenPoint,
             initialShape: cloneDeep(selectedShape),
           });
+
           if (handle === "line-start" || handle === "line-end") {
             updateHoverAnchors(point, selectedShape.id);
           }
@@ -1001,6 +1009,7 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
           });
           setSelectedId(duplicated.id);
           setTransformModeId(null);
+          setPendingInteraction(null);
           setInteraction({
             mode: "move",
             shapeId: duplicated.id,
@@ -1010,44 +1019,29 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
           return;
         }
 
-        const isAlreadySelected = selectedId === hit.id;
-        const isLocked = isShapeLocked(hit);
-
         setSelectedId(hit.id);
+        setTransformModeId(null);
 
-        if (isLocked) {
-          setTransformModeId(null);
+        if (isShapeLocked(hit)) {
+          setPendingInteraction(null);
+          setInteraction(null);
           return;
         }
 
-        if (!isAlreadySelected) {
-          setTransformModeId(null);
-          setInteraction({
-            mode: "move",
-            shapeId: hit.id,
-            startPointer: point,
-            initialShape: cloneDeep(hit),
-          });
-          return;
-        }
-
-        if (transformModeId === hit.id) {
-          setTransformModeId(null);
-          setInteraction({
-            mode: "move",
-            shapeId: hit.id,
-            startPointer: point,
-            initialShape: cloneDeep(hit),
-          });
-          return;
-        }
-
-        setTransformModeId(hit.id);
+        setPendingInteraction({
+          candidateMode: "move",
+          shapeId: hit.id,
+          startPointer: point,
+          startScreen: screenPoint,
+          initialShape: cloneDeep(hit),
+        });
+        setInteraction(null);
         return;
       }
 
       setSelectedId(null);
       setTransformModeId(null);
+      setPendingInteraction(null);
       setInteraction(null);
       setPanState({
         startScreen: screenPoint,
@@ -1214,12 +1208,38 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
       return;
     }
 
-    if (!interaction) {
-      if (
-        selectedShape &&
-        !isShapeLocked(selectedShape) &&
-        transformModeId === selectedShape.id
-      ) {
+    let activeInteraction = interaction;
+
+    if (!activeInteraction && pendingInteraction) {
+      const dxScreen = screenPoint.x - pendingInteraction.startScreen.x;
+      const dyScreen = screenPoint.y - pendingInteraction.startScreen.y;
+      const dragDistance = Math.hypot(dxScreen, dyScreen);
+      const dragThresholdPx = 6;
+
+      if (dragDistance < dragThresholdPx) {
+        setCanvasCursor(getCursorByHandle(pendingInteraction.candidateMode));
+        return;
+      }
+
+      const resolvedMode = resolveIntentHandle(
+        pendingInteraction.candidateMode,
+        dxScreen,
+        dyScreen
+      );
+
+      activeInteraction = {
+        mode: resolvedMode,
+        shapeId: pendingInteraction.shapeId,
+        startPointer: pendingInteraction.startPointer,
+        initialShape: pendingInteraction.initialShape,
+      };
+
+      setInteraction(activeInteraction);
+      setPendingInteraction(null);
+    }
+
+    if (!activeInteraction) {
+      if (selectedShape && !isShapeLocked(selectedShape)) {
         const hoveredHandle = hitTestHandleScreen(screenPoint, selectedShape, camera);
         if (hoveredHandle) {
           setCanvasCursor(getCursorByHandle(hoveredHandle));
@@ -1244,47 +1264,51 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
 
       return;
     }
-    setCanvasCursor(getCursorByHandle(interaction.mode));
-    if (interaction.mode === "line-start" || interaction.mode === "line-end") {
-      updateHoverAnchors(point, interaction.shapeId);
+
+    setCanvasCursor(getCursorByHandle(activeInteraction.mode));
+
+    if (activeInteraction.mode === "line-start" || activeInteraction.mode === "line-end") {
+      updateHoverAnchors(point, activeInteraction.shapeId);
     } else {
       clearHoverAnchors();
     }
 
     setShapes((prev) => {
-  let updated = prev.map((shape) =>
-    shape.id === interaction.shapeId ? transformShape(shape, interaction, point, prev) : shape
-  );
-
-  if (interaction.mode === "move") {
-    const movingShape = updated.find((shape) => shape.id === interaction.shapeId);
-
-    if (
-      movingShape &&
-      movingShape.type !== "line" &&
-      movingShape.type !== "cable"
-    ) {
-      const snapped = computeSnappedMove(
-        movingShape,
-        updated,
-        interaction.shapeId,
-        camera
+      let updated = prev.map((shape) =>
+        shape.id === activeInteraction!.shapeId
+          ? transformShape(shape, activeInteraction!, point, prev)
+          : shape
       );
 
-      updated = updated.map((shape) =>
-        shape.id === interaction.shapeId ? snapped.shape : shape
-      );
+      if (activeInteraction!.mode === "move") {
+        const movingShape = updated.find((shape) => shape.id === activeInteraction!.shapeId);
 
-      setAlignmentGuides(snapped.guides);
-    } else {
-      setAlignmentGuides([]);
-    }
-  } else {
-    setAlignmentGuides([]);
-  }
+        if (
+          movingShape &&
+          movingShape.type !== "line" &&
+          movingShape.type !== "cable"
+        ) {
+          const snapped = computeSnappedMove(
+            movingShape,
+            updated,
+            activeInteraction!.shapeId,
+            camera
+          );
 
-  return applyAttachments(updated);
-});
+          updated = updated.map((shape) =>
+            shape.id === activeInteraction!.shapeId ? snapped.shape : shape
+          );
+
+          setAlignmentGuides(snapped.guides);
+        } else {
+          setAlignmentGuides([]);
+        }
+      } else {
+        setAlignmentGuides([]);
+      }
+
+      return applyAttachments(updated);
+    });
   }
 
   function handleCanvasMouseUp() {
@@ -1316,6 +1340,7 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
       window.setTimeout(() => commitHistory(finalized), 0);
       setDraftLine(null);
       setTool("select");
+      setPendingInteraction(null);
       setPanState(null);
       clearHoverAnchors();
       return;
@@ -1402,6 +1427,7 @@ setCanvasCursor("grab");
     });
     setSelectedId(null);
     setTransformModeId(null);
+    setPendingInteraction(null);
   }
 
   function clearAllConfirmed() {
@@ -1411,9 +1437,11 @@ setCanvasCursor("grab");
     setTransformModeId(null);
     setDraftLine(null);
     setCalibrationPoints([]);
+    setPendingInteraction(null);
     setInteraction(null);
     setPanState(null);
     setHoverAnchorState(null);
+    setPendingInteraction(null);
     setShowClearConfirm(false);
     setStatus("Проект очищен");
     window.setTimeout(() => commitHistory([], [], [], 0), 0);
@@ -1613,9 +1641,7 @@ setCanvasCursor("grab");
                 ) : null}
               </g>
 {renderAlignmentGuidesScreen(alignmentGuides, camera, canvasSize)}
-{selectedShape &&
- !isShapeLocked(selectedShape) &&
- transformModeId === selectedShape.id
+{selectedShape && !isShapeLocked(selectedShape)
   ? renderSelectionOverlayScreen(selectedShape, camera)
   : null}
             </svg>
@@ -3745,6 +3771,41 @@ function getCursorByHandle(handle: HandleType): React.CSSProperties["cursor"] {
     default:
       return "grab";
   }
+}
+
+function resolveIntentHandle(
+  candidateMode: HandleType,
+  dxScreen: number,
+  dyScreen: number
+): HandleType {
+  const absX = Math.abs(dxScreen);
+  const absY = Math.abs(dyScreen);
+
+  if (
+    candidateMode === "resize-nw" ||
+    candidateMode === "resize-ne" ||
+    candidateMode === "resize-se" ||
+    candidateMode === "resize-sw" ||
+    candidateMode === "rotate" ||
+    candidateMode === "line-start" ||
+    candidateMode === "line-end"
+  ) {
+    return candidateMode;
+  }
+
+  if (candidateMode === "resize-circle") {
+    return absX >= absY * 0.85 ? "resize-circle" : "move";
+  }
+
+  if (candidateMode === "resize-e" || candidateMode === "resize-w") {
+    return absX >= Math.max(4, absY * 0.85) ? candidateMode : "move";
+  }
+
+  if (candidateMode === "resize-n" || candidateMode === "resize-s") {
+    return absY >= Math.max(4, absX * 0.85) ? candidateMode : "move";
+  }
+
+  return "move";
 }
 
 function orthogonalSnap(from: { x: number; y: number }, to: { x: number; y: number }, tolerance = 2) {
