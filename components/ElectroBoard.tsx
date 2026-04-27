@@ -235,8 +235,8 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   const [showLibrary, setShowLibrary] = useState(false);
   const [libraryCountry, setLibraryCountry] = useState<LibraryCountry>("FR");
   const [hoverAnchorState, setHoverAnchorState] = useState<HoverAnchorState | null>(null);
-const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
-const [canvasSize] = useState({ width: 1400, height: 900 });
+  const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
+  const [canvasSize] = useState({ width: 1400, height: 900 });
   const [canvasCursor, setCanvasCursor] = useState<React.CSSProperties["cursor"]>("grab");
   const [cadStrokeScale, setCadStrokeScale] = useState(1.8);
 
@@ -2065,7 +2065,12 @@ function Modal({
   );
 }
 
-function renderShape(shape: Shape, selected: boolean, cadAssets: CadAsset[]) {
+function renderShape(
+  shape: Shape,
+  selected: boolean,
+  cadAssets: CadAsset[],
+  cadStrokeScale: number
+) {
   const stroke = shape.strokeColor;
   const fill =
     shape.type === "line" || shape.type === "cable"
@@ -3414,10 +3419,7 @@ function worldToScreenPoint(
   worldY: number,
   camera: CameraState
 ) {
-  return {
-    x: camera.x + worldX * camera.zoom,
-    y: camera.y + worldY * camera.zoom,
-  };
+  return projectWorldToScreen(worldX, worldY, camera);
 }
 function projectWorldToScreen(
   worldX: number,
