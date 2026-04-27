@@ -166,6 +166,7 @@ type HistoryState = {
   calibrationPoints: CalibrationPoint[];
   metersPerPixel: number;
   projectName: string;
+  camera: CameraState;
 };
 
 type CameraState = {
@@ -265,6 +266,21 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
       const nextCadAssets = (saved.data?.cadAssets || []) as CadAsset[];
       const nextMetersPerPixel = Number(saved.data?.metersPerPixel || 0);
       const nextCalibration = (saved.data?.calibrationPoints || []) as CalibrationPoint[];
+      const savedCamera = saved?.data?.camera as CameraState | undefined;
+
+const fallbackCamera: CameraState = {
+  x: canvasSize.width / 2,
+  y: canvasSize.height / 2,
+  zoom: 1,
+};
+
+const nextCamera =
+  savedCamera &&
+  typeof savedCamera.x === "number" &&
+  typeof savedCamera.y === "number" &&
+  typeof savedCamera.zoom === "number"
+    ? savedCamera
+    : fallbackCamera;
 
       setProjectName(saved.name || "Project");
       setShapes(nextShapes);
@@ -275,55 +291,81 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
       setLastSavedAt(saved.updatedAt || null);
 
       const initial: HistoryState = {
-        shapes: cloneDeep(nextShapes),
-        cadAssets: cloneDeep(nextCadAssets),
-        calibrationPoints: cloneDeep(nextCalibration),
-        metersPerPixel: nextMetersPerPixel,
-        projectName: saved.name || "Project",
-      };
+  shapes: cloneDeep(nextShapes),
+  cadAssets: cloneDeep(nextCadAssets),
+  calibrationPoints: cloneDeep(nextCalibration),
+  metersPerPixel: nextMetersPerPixel,
+  projectName: saved.name || "Project",
+  camera: cloneDeep(nextCamera),
+};
 
       setHistory([initial]);
       setHistoryIndex(0);
     } else {
       const initial: HistoryState = {
-        shapes: [],
-        cadAssets: [],
-        calibrationPoints: [],
-        metersPerPixel: 0,
-        projectName: "Project",
-      };
+  shapes: [],
+  cadAssets: [],
+  calibrationPoints: [],
+  metersPerPixel: 0,
+  projectName: "Project",
+  camera: {
+    x: canvasSize.width / 2,
+    y: canvasSize.height / 2,
+    zoom: 1,
+  },
+};
       setHistory([initial]);
       setHistoryIndex(0);
     }
 
-    setCamera({
-      x: canvasSize.width / 2,
-      y: canvasSize.height / 2,
-      zoom: 1,
-    });
+    if (saved) {
+  setCamera(nextCamera);
+} else {
+  setCamera({
+    x: canvasSize.width / 2,
+    y: canvasSize.height / 2,
+    zoom: 1,
+  });
+}
 
     setLoaded(true);
   }, [projectId, canvasSize.width, canvasSize.height]);
 
   useEffect(() => {
-    if (!loaded) return;
+  if (!loaded) return;
 
-    const onBeforeUnload = () => {
-      persistProjectData(
-        {
-          shapes,
-          cadAssets,
-          calibrationPoints,
-          metersPerPixel,
-          projectName,
-        },
-        false
-      );
-    };
+  const onBeforeUnload = () => {
+    persistProjectData(
+      {
+        shapes,
+        cadAssets,
+        calibrationPoints,
+        metersPerPixel,
+        projectName,
+        camera,
+      },
+      false
+    );
+  };
 
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [loaded, projectId, shapes, cadAssets, calibrationPoints, metersPerPixel, projectName, libraryCountry]);
+  window.addEventListener("beforeunload", onBeforeUnload);
+  return () => window.removeEventListener("beforeunload", onBeforeUnload);
+}, [loaded, projectId, shapes, cadAssets, calibrationPoints, metersPerPixel, projectName, libraryCountry, camera]);
+useEffect(() => {
+  if (!loaded) return;
+
+  persistProjectData(
+    {
+      shapes,
+      cadAssets,
+      calibrationPoints,
+      metersPerPixel,
+      projectName,
+      camera,
+    },
+    false
+  );
+}, [camera, loaded]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -393,12 +435,13 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       data: {
-        shapes: data.shapes,
-        cadAssets: data.cadAssets,
-        metersPerPixel: data.metersPerPixel,
-        calibrationPoints: data.calibrationPoints,
-        libraryCountry,
-      },
+  shapes: data.shapes,
+  cadAssets: data.cadAssets,
+  metersPerPixel: data.metersPerPixel,
+  calibrationPoints: data.calibrationPoints,
+  camera: data.camera,
+  libraryCountry,
+},
     });
 
     setLastSavedAt(now);
@@ -413,17 +456,18 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
   }
 
   function persistCurrent() {
-    persistProjectData(
-      {
-        shapes,
-        cadAssets,
-        calibrationPoints,
-        metersPerPixel,
-        projectName,
-      },
-      true
-    );
-  }
+  persistProjectData(
+    {
+      shapes,
+      cadAssets,
+      calibrationPoints,
+      metersPerPixel,
+      projectName,
+      camera,
+    },
+    true
+  );
+}
 
   function pushHistory(next: HistoryState) {
     setHistory((prev) => {
@@ -442,19 +486,21 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
   }
 
   function commitHistory(
-    nextShapes?: Shape[],
-    nextCadAssets?: CadAsset[],
-    nextCalibrationPoints?: CalibrationPoint[],
-    nextMetersPerPixel?: number,
-    nextProjectName?: string
-  ) {
+  nextShapes?: Shape[],
+  nextCadAssets?: CadAsset[],
+  nextCalibrationPoints?: CalibrationPoint[],
+  nextMetersPerPixel?: number,
+  nextProjectName?: string,
+  nextCamera?: CameraState
+) {
     const nextState: HistoryState = {
-      shapes: cloneDeep(nextShapes ?? shapes),
-      cadAssets: cloneDeep(nextCadAssets ?? cadAssets),
-      calibrationPoints: cloneDeep(nextCalibrationPoints ?? calibrationPoints),
-      metersPerPixel: nextMetersPerPixel ?? metersPerPixel,
-      projectName: nextProjectName ?? projectName,
-    };
+  shapes: cloneDeep(nextShapes ?? shapes),
+  cadAssets: cloneDeep(nextCadAssets ?? cadAssets),
+  calibrationPoints: cloneDeep(nextCalibrationPoints ?? calibrationPoints),
+  metersPerPixel: nextMetersPerPixel ?? metersPerPixel,
+  projectName: nextProjectName ?? projectName,
+  camera: cloneDeep(nextCamera ?? camera),
+};
 
     pushHistory(nextState);
     persistProjectData(nextState);
@@ -472,6 +518,7 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
     setHoverAnchorState(null);
     persistProjectData(state, false);
     setStatus("История применена");
+    setCamera(cloneDeep(state.camera));
   }
 
   function undo() {
