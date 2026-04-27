@@ -177,6 +177,52 @@ function buildItem(params: {
     drawingAssets: params.drawingAssets || defaultDrawingAssets(params.article),
   };
 }
+const TURKEY_PRODUCT_URLS: Partial<Record<string, string>> = {
+  EZ9F34140:
+    "https://www.se.com/tr/tr/product/EZ9F34140/otomatik-sigorta-easy9-45ka-ce%C4%9Frisi-1kutup-40a/",
+  EZ9F34220:
+    "https://www.se.com/tr/tr/product/EZ9F34220/minyat%C3%BCr-devre-kesici-mcb-easy9-2p-20a-c-e%C4%9Frisi-4500a-iec-en-608981/",
+  EZ9F34240:
+    "https://www.se.com/tr/tr/product/EZ9F34240/otomatik-sigorta-easy9-45ka-ce%C4%9Frisi-2kutup-40a/",
+  EZ9F34420:
+    "https://www.se.com/tr/tr/product/EZ9F34420/minyat%C3%BCr-devre-kesici-mcb-easy9-4p-20a-c-e%C4%9Frisi-4500a-iec-en-608981/",
+  EZ9F43450:
+    "https://www.se.com/tr/tr/product/EZ9F43450/otomatik-sigorta-easy9-3ka-ce%C4%9Frisi-4kutup-50a/",
+  EZ9F51120:
+    "https://www.se.com/tr/tr/product/EZ9F51120/otomatik-sigorta-easy9-1p-20-a-c-curve-10000-a/",
+  EZ9F51163:
+    "https://www.se.com/tr/tr/product/EZ9F51163/otomatik-sigorta-easy9-1p-63-a-c-curve-10000-a/",
+  EZ9F51210:
+    "https://www.se.com/tr/tr/product/EZ9F51210/otomatik-sigorta-easy9-2p-10-a-c-curve-10000-a/",
+  EZ9F51216:
+    "https://www.se.com/tr/tr/product/EZ9F51216/otomatik-sigorta-easy9-2p-16-a-c-curve-10000-a/",
+  EZ9F51240:
+    "https://www.se.com/tr/tr/product/EZ9F51240/otomatik-sigorta-easy9-2p-40-a-c-curve-10000-a/",
+  EZ9F56240:
+    "https://www.se.com/tr/tr/product/EZ9F56240/easy9-mcb-2p-40a-c-6000a-230v-otomatik-sigorta/",
+  EZ9R34240:
+    "https://www.se.com/tr/tr/product/EZ9R34240/easy9-ka%C3%A7ak-ak%C4%B1m-r%C3%B6lesi-2-kutup-40a-30ma-ac-tipi-230v/",
+};
+
+function resolveCatalogImageUrl(item: DeviceLibrarySourceItem, country: LibraryCountry) {
+  if (country !== "TR") {
+    return item.catalogImageUrl;
+  }
+
+  const productUrl = item.productUrl || TURKEY_PRODUCT_URLS[item.article];
+
+  if (!productUrl) {
+    return item.catalogImageUrl;
+  }
+
+  const params = new URLSearchParams({
+    url: productUrl,
+    article: item.article,
+    series: item.series,
+  });
+
+  return `/api/library/product-image?${params.toString()}`;
+}
 
 function buildTurkeyMcb(
   article: string,
@@ -435,7 +481,7 @@ export function getStaticDeviceLibrary(country: LibraryCountry): DeviceLibraryIt
         fullCategoryLabel(country, item.category),
       article: item.article,
       modules: item.modules,
-      catalogImageUrl: item.catalogImageUrl,
+      catalogImageUrl: resolveCatalogImageUrl(item, country),
       productUrl: item.productUrl,
       name:
         item.titleByCountry[country] ||
