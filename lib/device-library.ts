@@ -155,6 +155,11 @@ function schneiderRenditionUrl(docRef: string) {
 function turkeyArticleImageUrl(article: string) {
   return schneiderRenditionUrl(`${article}_IoP-Default`);
 }
+const TURKEY_IMAGE_DOCREF_OVERRIDES: Partial<Record<string, string>> = {
+  EZ9F51120: "PB111299",
+  EZ9F51216: "PB111300",
+  EZ9F51240: "PB111300",
+};
 
 function buildItem(params: {
   id: string;
@@ -177,7 +182,11 @@ function buildItem(params: {
     article: params.article,
     modules: params.modules,
     catalogImageUrl: params.countries.includes("TR")
-  ? schneiderRenditionUrl(params.imageDocRef || `${params.article}_IoP-Default`)
+  ? schneiderRenditionUrl(
+      params.imageDocRef ||
+        TURKEY_IMAGE_DOCREF_OVERRIDES[params.article] ||
+        `${params.article}_IoP-Default`
+    )
   : makeCatalogPreview({
       brand: "Schneider",
       series: params.series,
