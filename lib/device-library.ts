@@ -2,7 +2,7 @@ export type LibraryCountry = "FR" | "DE" | "US" | "TR";
 
 export type DeviceCategory = "mcb" | "rcd" | "rcbo";
 
-export type CadVariant = {
+export type DrawingAsset = {
   id: string;
   label: string;
   format: "dwg" | "dxf" | "pdf" | "jpg" | "png";
@@ -17,11 +17,11 @@ export type DeviceLibrarySourceItem = {
   category: DeviceCategory;
   article: string;
   modules: number;
-  imageUrl: string;
+  catalogImageUrl: string;
   titleByCountry: Partial<Record<LibraryCountry, string>>;
   categoryLabelByCountry: Partial<Record<LibraryCountry, string>>;
   countries: LibraryCountry[];
-  cadVariants: CadVariant[];
+  drawingAssets: DrawingAsset[];
 };
 
 export type DeviceLibraryItem = {
@@ -32,10 +32,10 @@ export type DeviceLibraryItem = {
   categoryLabel: string;
   article: string;
   modules: number;
-  imageUrl: string;
+  catalogImageUrl: string;
   name: string;
   country: LibraryCountry;
-  cadVariants: CadVariant[];
+  drawingAssets: DrawingAsset[];
 };
 
 export const libraryCountries: { value: LibraryCountry; label: string }[] = [
@@ -45,10 +45,46 @@ export const libraryCountries: { value: LibraryCountry; label: string }[] = [
   { value: "TR", label: "Türkiye" },
 ];
 
-function makePlaceholderImage(params: {
+export function fullCategoryLabel(country: LibraryCountry, category: DeviceCategory) {
+  const labels: Record<LibraryCountry, Record<DeviceCategory, string>> = {
+    FR: {
+      mcb: "Автоматический выключатель",
+      rcd: "Устройство защитного отключения",
+      rcbo: "Дифференциальный автомат",
+    },
+    DE: {
+      mcb: "Автоматический выключатель",
+      rcd: "Устройство защитного отключения",
+      rcbo: "Дифференциальный автомат",
+    },
+    US: {
+      mcb: "Circuit breaker",
+      rcd: "Residual current device",
+      rcbo: "Residual current breaker with overcurrent protection",
+    },
+    TR: {
+      mcb: "Otomatik sigorta",
+      rcd: "Kaçak akım koruma şalteri",
+      rcbo: "Diferansiyel otomatik sigorta",
+    },
+  };
+
+  return labels[country][category];
+}
+
+function escapeXml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function makeCatalogPreview(params: {
   brand: string;
   series: string;
-  line1: string;
+  article: string;
   line2: string;
 }) {
   const svg = `
@@ -71,7 +107,7 @@ function makePlaceholderImage(params: {
       params.series
     )}</text>
     <text x="120" y="204" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#374151">${escapeXml(
-      params.line1
+      params.article
     )}</text>
     <text x="120" y="221" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#6b7280">${escapeXml(
       params.line2
@@ -79,15 +115,6 @@ function makePlaceholderImage(params: {
   </svg>`;
 
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
-}
-
-function escapeXml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
 }
 
 function buildItem(params: {
@@ -99,7 +126,7 @@ function buildItem(params: {
   countries: LibraryCountry[];
   titleByCountry: Partial<Record<LibraryCountry, string>>;
   categoryLabelByCountry: Partial<Record<LibraryCountry, string>>;
-  cadVariants?: CadVariant[];
+  drawingAssets?: DrawingAsset[];
 }): DeviceLibrarySourceItem {
   return {
     id: params.id,
@@ -108,31 +135,38 @@ function buildItem(params: {
     category: params.category,
     article: params.article,
     modules: params.modules,
-    imageUrl: makePlaceholderImage({
+    catalogImageUrl: makeCatalogPreview({
       brand: "Schneider",
       series: params.series,
-      line1: params.article,
+      article: params.article,
       line2: params.category.toUpperCase(),
     }),
     titleByCountry: params.titleByCountry,
     categoryLabelByCountry: params.categoryLabelByCountry,
     countries: params.countries,
-    cadVariants:
-      params.cadVariants ||
+    drawingAssets:
+      params.drawingAssets ||
       [
-        {
-          id: "front-png",
-          label: "Front PNG",
-          format: "png",
-          viewType: "front",
-          sourceUrl: `mock://cad/${params.article}/front.png`,
-        },
         {
           id: "front-dwg",
           label: "Front DWG",
           format: "dwg",
           viewType: "front",
           sourceUrl: `mock://cad/${params.article}/front.dwg`,
+        },
+        {
+          id: "front-dxf",
+          label: "Front DXF",
+          format: "dxf",
+          viewType: "front",
+          sourceUrl: `mock://cad/${params.article}/front.dxf`,
+        },
+        {
+          id: "front-pdf",
+          label: "Front PDF",
+          format: "pdf",
+          viewType: "front",
+          sourceUrl: `mock://cad/${params.article}/front.pdf`,
         },
       ],
   };
@@ -458,22 +492,6 @@ const schneiderDevices: DeviceLibrarySourceItem[] = [
     categoryLabelByCountry: {
       TR: "Kaçak akım koruma şalteri",
     },
-    cadVariants: [
-      {
-        id: "front-png",
-        label: "Front PNG",
-        format: "png",
-        viewType: "front",
-        sourceUrl: "mock://cad/EZ9R34240/front.png",
-      },
-      {
-        id: "front-pdf",
-        label: "Front PDF",
-        format: "pdf",
-        viewType: "front",
-        sourceUrl: "mock://cad/EZ9R34240/front.pdf",
-      },
-    ],
   }),
 
   buildItem({
@@ -489,22 +507,6 @@ const schneiderDevices: DeviceLibrarySourceItem[] = [
     categoryLabelByCountry: {
       TR: "Kaçak akım koruma şalteri",
     },
-    cadVariants: [
-      {
-        id: "front-png",
-        label: "Front PNG",
-        format: "png",
-        viewType: "front",
-        sourceUrl: "mock://cad/EZ9R34263/front.png",
-      },
-      {
-        id: "front-pdf",
-        label: "Front PDF",
-        format: "pdf",
-        viewType: "front",
-        sourceUrl: "mock://cad/EZ9R34263/front.pdf",
-      },
-    ],
   }),
 
   buildItem({
@@ -567,13 +569,13 @@ export function getDeviceLibrary(country: LibraryCountry): DeviceLibraryItem[] {
         fullCategoryLabel(country, item.category),
       article: item.article,
       modules: item.modules,
-      imageUrl: item.imageUrl,
+      catalogImageUrl: item.catalogImageUrl,
       name:
         item.titleByCountry[country] ||
         item.titleByCountry.FR ||
         item.article,
       country,
-      cadVariants: item.cadVariants,
+      drawingAssets: item.drawingAssets,
     }))
     .sort((a, b) => {
       if (a.series !== b.series) return a.series.localeCompare(b.series);
@@ -602,31 +604,4 @@ export function filterDeviceLibrary(params: {
 
     return matchesSearch && matchesCategory;
   });
-}
-
-export function fullCategoryLabel(country: LibraryCountry, category: DeviceCategory) {
-  const labels: Record<LibraryCountry, Record<DeviceCategory, string>> = {
-    FR: {
-      mcb: "Автоматический выключатель",
-      rcd: "Устройство защитного отключения",
-      rcbo: "Дифференциальный автомат",
-    },
-    DE: {
-      mcb: "Автоматический выключатель",
-      rcd: "Устройство защитного отключения",
-      rcbo: "Дифференциальный автомат",
-    },
-    US: {
-      mcb: "Circuit breaker",
-      rcd: "Residual current device",
-      rcbo: "Residual current breaker with overcurrent protection",
-    },
-    TR: {
-      mcb: "Otomatik sigorta",
-      rcd: "Kaçak akım koruma şalteri",
-      rcbo: "Diferansiyel otomatik sigorta",
-    },
-  };
-
-  return labels[country][category];
 }
