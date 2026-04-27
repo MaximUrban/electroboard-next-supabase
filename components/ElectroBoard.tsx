@@ -81,7 +81,7 @@ type SwitchShape = BaseShape & {
 };
 
 type Shape =
-  | Shape
+  | RectangleShape
   | CircleShape
   | LineShape
   | SocketShape
