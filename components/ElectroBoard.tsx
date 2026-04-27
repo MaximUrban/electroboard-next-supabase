@@ -239,6 +239,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
 const [canvasSize] = useState({ width: 1400, height: 900 });
   const [canvasCursor, setCanvasCursor] = useState<React.CSSProperties["cursor"]>("grab");
+  const [cadStrokeScale, setCadStrokeScale] = useState(1.8);
 
   const [history, setHistory] = useState<HistoryState[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -1508,7 +1509,7 @@ setCanvasCursor("grab");
   </React.Fragment>
 ))}
 
-                {draftLine ? renderShape(draftLine, true, cadAssets) : null}
+                {draftLine ? renderShape(draftLine, true, cadAssets, cadStrokeScale) : null}
 
                 {hoverAnchorState ? (
                   <g pointerEvents="none">
@@ -1602,6 +1603,27 @@ setCanvasCursor("grab");
               Выберите <b>Масштаб</b> и нажмите две точки.
             </div>
           </div>
+          <div style={styles.card}>
+  <div style={styles.cardTitle}>CAD отображение</div>
+
+  <div style={styles.compactField}>
+    <label style={styles.label}>
+      Толщина CAD: {cadStrokeScale.toFixed(1)}x
+    </label>
+    <input
+      type="range"
+      min={1}
+      max={4}
+      step={0.1}
+      value={cadStrokeScale}
+      onChange={(e) => setCadStrokeScale(Number(e.target.value))}
+    />
+  </div>
+
+  <div style={styles.hintCompact}>
+    Меняет читаемость импортированного чертежа на экране.
+  </div>
+</div>
 
           <div style={styles.card}>
             <div style={styles.cardTitle}>Объект</div>
@@ -2086,7 +2108,12 @@ function Modal({
   );
 }
 
-function renderShape(shape: Shape, selected: boolean, cadAssets: CadAsset[]) {
+function renderShape(
+  shape: Shape,
+  selected: boolean,
+  cadAssets: CadAsset[],
+  cadStrokeScale: number
+) {
   const stroke = shape.strokeColor;
   const fill =
     shape.type === "line" || shape.type === "cable"
@@ -2274,12 +2301,13 @@ function renderShape(shape: Shape, selected: boolean, cadAssets: CadAsset[]) {
 
         <g transform={`translate(${shape.x} ${shape.y}) scale(${scaleX} ${scaleY})`}>
           {asset.primitives.map((primitive, index) =>
-            renderCadPrimitive(
-              primitive,
-              `${shape.id}-${index}`,
-              shape.layerState[primitive.layerId] ?? true
-            )
-          )}
+  renderCadPrimitive(
+    primitive,
+    `${shape.id}-${index}`,
+    shape.layerState[primitive.layerId] ?? true,
+    cadStrokeScale
+  )
+)}
         </g>
 
         <text x={shape.x} y={shape.y - 10} fill="#f2f6ff" fontSize="14">
@@ -2295,7 +2323,8 @@ function renderShape(shape: Shape, selected: boolean, cadAssets: CadAsset[]) {
 function renderCadPrimitive(
   primitive: CadPrimitive,
   key: string,
-  visible: boolean
+  visible: boolean,
+  cadStrokeScale: number
 ) {
   if (!visible) return null;
 
@@ -2305,7 +2334,7 @@ function renderCadPrimitive(
     primitive.type === "circle"
       ? primitive.strokeWidth || 1
       : 1;
-  const boostedStrokeWidth = Math.max(baseStrokeWidth * 1.8, 2.2);
+  const boostedStrokeWidth = Math.max(baseStrokeWidth * cadStrokeScale, 2.2);
 
   if (primitive.type === "line") {
     return (
