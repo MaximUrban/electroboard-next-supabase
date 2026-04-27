@@ -909,7 +909,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
     if (tool === "select") {
       if (selectedShape) {
-        const handle = hitTestHandle(point.x, point.y, selectedShape);
+        const handle = hitTestHandle(point.x, point.y, selectedShape, camera.zoom);
         if (handle) {
           setInteraction({
             mode: handle,
@@ -1396,7 +1396,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
                 {shapes.map((shape) => (
                   <React.Fragment key={shape.id}>
                     {renderShape(shape, selectedId === shape.id, cadAssets)}
-                    {selectedId === shape.id ? renderSelectionOverlay(shape) : null}
+                    {selectedId === shape.id ? renderSelectionOverlay(shape, camera.zoom) : null}
                   </React.Fragment>
                 ))}
 
@@ -2248,15 +2248,46 @@ function renderCadPrimitive(
   return null;
 }
 
-function renderSelectionOverlay(shape: Shape) {
+function renderSelectionOverlay(shape: Shape, zoom: number) {
+  const z = Math.max(zoom, 0.2);
+
+  const mainHandleR = 8 / z;
+  const sideHandleR = 7 / z;
+  const anchorR = 4 / z;
+
   if (shape.type === "line" || shape.type === "cable") {
     const midX = (shape.x + shape.x2) / 2;
     const midY = (shape.y + shape.y2) / 2;
+
     return (
       <g>
-        <circle cx={shape.x} cy={shape.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" style={{ cursor: "move" }} />
-        <circle cx={shape.x2} cy={shape.y2} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" style={{ cursor: "move" }} />
-        <circle cx={midX} cy={midY} r="7" fill="#3d63ff" stroke="#fff" strokeWidth="2" style={{ cursor: "move" }} />
+        <circle
+          cx={shape.x}
+          cy={shape.y}
+          r={mainHandleR}
+          fill="#fff"
+          stroke="#3d63ff"
+          strokeWidth={3 / z}
+          style={{ cursor: "move" }}
+        />
+        <circle
+          cx={shape.x2}
+          cy={shape.y2}
+          r={mainHandleR}
+          fill="#fff"
+          stroke="#3d63ff"
+          strokeWidth={3 / z}
+          style={{ cursor: "move" }}
+        />
+        <circle
+          cx={midX}
+          cy={midY}
+          r={7 / z}
+          fill="#3d63ff"
+          stroke="#fff"
+          strokeWidth={2 / z}
+          style={{ cursor: "move" }}
+        />
       </g>
     );
   }
@@ -2267,15 +2298,23 @@ function renderSelectionOverlay(shape: Shape) {
     return (
       <g>
         {anchors.map((a) => (
-          <circle key={a.id} cx={a.x} cy={a.y} r="4" fill="#9ec1ff" stroke="#fff" strokeWidth="1.5" />
+          <circle
+            key={a.id}
+            cx={a.x}
+            cy={a.y}
+            r={anchorR}
+            fill="#9ec1ff"
+            stroke="#fff"
+            strokeWidth={1.5 / z}
+          />
         ))}
         <circle
           cx={shape.x + shape.radius}
           cy={shape.y}
-          r="8"
+          r={mainHandleR}
           fill="#fff"
           stroke="#3d63ff"
-          strokeWidth="3"
+          strokeWidth={3 / z}
           style={{ cursor: "ew-resize" }}
         />
       </g>
@@ -2293,7 +2332,15 @@ function renderSelectionOverlay(shape: Shape) {
     return (
       <g>
         {anchors.map((a) => (
-          <circle key={a.id} cx={a.x} cy={a.y} r="4" fill="#9ec1ff" stroke="#fff" strokeWidth="1.5" />
+          <circle
+            key={a.id}
+            cx={a.x}
+            cy={a.y}
+            r={anchorR}
+            fill="#9ec1ff"
+            stroke="#fff"
+            strokeWidth={1.5 / z}
+          />
         ))}
 
         <line
@@ -2302,27 +2349,91 @@ function renderSelectionOverlay(shape: Shape) {
           x2={geometry.rotateHandle.x}
           y2={geometry.rotateHandle.y}
           stroke="#79a6ff"
-          strokeWidth="2"
+          strokeWidth={2 / z}
           opacity="0.7"
         />
 
-        <circle cx={geometry.corners.nw.x} cy={geometry.corners.nw.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" style={{ cursor: "nwse-resize" }} />
-        <circle cx={geometry.corners.ne.x} cy={geometry.corners.ne.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" style={{ cursor: "nesw-resize" }} />
-        <circle cx={geometry.corners.se.x} cy={geometry.corners.se.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" style={{ cursor: "nwse-resize" }} />
-        <circle cx={geometry.corners.sw.x} cy={geometry.corners.sw.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" style={{ cursor: "nesw-resize" }} />
+        <circle
+          cx={geometry.corners.nw.x}
+          cy={geometry.corners.nw.y}
+          r={mainHandleR}
+          fill="#fff"
+          stroke="#3d63ff"
+          strokeWidth={3 / z}
+          style={{ cursor: "nwse-resize" }}
+        />
+        <circle
+          cx={geometry.corners.ne.x}
+          cy={geometry.corners.ne.y}
+          r={mainHandleR}
+          fill="#fff"
+          stroke="#3d63ff"
+          strokeWidth={3 / z}
+          style={{ cursor: "nesw-resize" }}
+        />
+        <circle
+          cx={geometry.corners.se.x}
+          cy={geometry.corners.se.y}
+          r={mainHandleR}
+          fill="#fff"
+          stroke="#3d63ff"
+          strokeWidth={3 / z}
+          style={{ cursor: "nwse-resize" }}
+        />
+        <circle
+          cx={geometry.corners.sw.x}
+          cy={geometry.corners.sw.y}
+          r={mainHandleR}
+          fill="#fff"
+          stroke="#3d63ff"
+          strokeWidth={3 / z}
+          style={{ cursor: "nesw-resize" }}
+        />
 
-        <circle cx={geometry.sides.n.x} cy={geometry.sides.n.y} r="7" fill="#dfe8ff" stroke="#3d63ff" strokeWidth="2.5" style={{ cursor: "ns-resize" }} />
-        <circle cx={geometry.sides.e.x} cy={geometry.sides.e.y} r="7" fill="#dfe8ff" stroke="#3d63ff" strokeWidth="2.5" style={{ cursor: "ew-resize" }} />
-        <circle cx={geometry.sides.s.x} cy={geometry.sides.s.y} r="7" fill="#dfe8ff" stroke="#3d63ff" strokeWidth="2.5" style={{ cursor: "ns-resize" }} />
-        <circle cx={geometry.sides.w.x} cy={geometry.sides.w.y} r="7" fill="#dfe8ff" stroke="#3d63ff" strokeWidth="2.5" style={{ cursor: "ew-resize" }} />
+        <circle
+          cx={geometry.sides.n.x}
+          cy={geometry.sides.n.y}
+          r={sideHandleR}
+          fill="#dfe8ff"
+          stroke="#3d63ff"
+          strokeWidth={2.5 / z}
+          style={{ cursor: "ns-resize" }}
+        />
+        <circle
+          cx={geometry.sides.e.x}
+          cy={geometry.sides.e.y}
+          r={sideHandleR}
+          fill="#dfe8ff"
+          stroke="#3d63ff"
+          strokeWidth={2.5 / z}
+          style={{ cursor: "ew-resize" }}
+        />
+        <circle
+          cx={geometry.sides.s.x}
+          cy={geometry.sides.s.y}
+          r={sideHandleR}
+          fill="#dfe8ff"
+          stroke="#3d63ff"
+          strokeWidth={2.5 / z}
+          style={{ cursor: "ns-resize" }}
+        />
+        <circle
+          cx={geometry.sides.w.x}
+          cy={geometry.sides.w.y}
+          r={sideHandleR}
+          fill="#dfe8ff"
+          stroke="#3d63ff"
+          strokeWidth={2.5 / z}
+          style={{ cursor: "ew-resize" }}
+        />
 
         <circle
           cx={geometry.rotateHandle.x}
           cy={geometry.rotateHandle.y}
-          r="8"
+          r={mainHandleR}
           fill="#fff"
           stroke="#3d63ff"
-          strokeWidth="3"
+          strokeWidth={3 / z}
           style={{ cursor: "crosshair" }}
         />
       </g>
@@ -2680,18 +2791,32 @@ function transformShape(
   return shape;
 }
 
-function hitTestHandle(px: number, py: number, shape: Shape): HandleType | null {
+function hitTestHandle(
+  px: number,
+  py: number,
+  shape: Shape,
+  zoom: number
+): HandleType | null {
+  const z = Math.max(zoom, 0.2);
+  const hitRadius = 18 / z;
+  const lineMidRadius = 20 / z;
+  const rotateRadius = 20 / z;
+
   if (shape.type === "line" || shape.type === "cable") {
     const midX = (shape.x + shape.x2) / 2;
     const midY = (shape.y + shape.y2) / 2;
-    if (distance(px, py, shape.x, shape.y) <= 12) return "line-start";
-    if (distance(px, py, shape.x2, shape.y2) <= 12) return "line-end";
-    if (distance(px, py, midX, midY) <= 12) return "move";
+
+    if (distance(px, py, shape.x, shape.y) <= hitRadius) return "line-start";
+    if (distance(px, py, shape.x2, shape.y2) <= hitRadius) return "line-end";
+    if (distance(px, py, midX, midY) <= lineMidRadius) return "move";
+
     return null;
   }
 
   if (shape.type === "circle") {
-    if (distance(px, py, shape.x + shape.radius, shape.y) <= 12) return "resize-circle";
+    if (distance(px, py, shape.x + shape.radius, shape.y) <= hitRadius) {
+      return "resize-circle";
+    }
     return null;
   }
 
@@ -2703,19 +2828,22 @@ function hitTestHandle(px: number, py: number, shape: Shape): HandleType | null 
   ) {
     const geometry = getSelectionGeometry(shape);
 
-    if (distance(px, py, geometry.rotateHandle.x, geometry.rotateHandle.y) <= 12) {
+    if (
+      distance(px, py, geometry.rotateHandle.x, geometry.rotateHandle.y) <=
+      rotateRadius
+    ) {
       return "rotate";
     }
 
-    if (distance(px, py, geometry.corners.nw.x, geometry.corners.nw.y) <= 12) return "resize-nw";
-    if (distance(px, py, geometry.corners.ne.x, geometry.corners.ne.y) <= 12) return "resize-ne";
-    if (distance(px, py, geometry.corners.se.x, geometry.corners.se.y) <= 12) return "resize-se";
-    if (distance(px, py, geometry.corners.sw.x, geometry.corners.sw.y) <= 12) return "resize-sw";
+    if (distance(px, py, geometry.corners.nw.x, geometry.corners.nw.y) <= hitRadius) return "resize-nw";
+    if (distance(px, py, geometry.corners.ne.x, geometry.corners.ne.y) <= hitRadius) return "resize-ne";
+    if (distance(px, py, geometry.corners.se.x, geometry.corners.se.y) <= hitRadius) return "resize-se";
+    if (distance(px, py, geometry.corners.sw.x, geometry.corners.sw.y) <= hitRadius) return "resize-sw";
 
-    if (distance(px, py, geometry.sides.n.x, geometry.sides.n.y) <= 12) return "resize-n";
-    if (distance(px, py, geometry.sides.e.x, geometry.sides.e.y) <= 12) return "resize-e";
-    if (distance(px, py, geometry.sides.s.x, geometry.sides.s.y) <= 12) return "resize-s";
-    if (distance(px, py, geometry.sides.w.x, geometry.sides.w.y) <= 12) return "resize-w";
+    if (distance(px, py, geometry.sides.n.x, geometry.sides.n.y) <= hitRadius) return "resize-n";
+    if (distance(px, py, geometry.sides.e.x, geometry.sides.e.y) <= hitRadius) return "resize-e";
+    if (distance(px, py, geometry.sides.s.x, geometry.sides.s.y) <= hitRadius) return "resize-s";
+    if (distance(px, py, geometry.sides.w.x, geometry.sides.w.y) <= hitRadius) return "resize-w";
   }
 
   return null;
