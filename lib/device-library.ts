@@ -18,6 +18,7 @@ export type DeviceLibrarySourceItem = {
   article: string;
   modules: number;
   catalogImageUrl: string;
+  imageDocRef?: string;
   productUrl?: string;
   titleByCountry: Partial<Record<LibraryCountry, string>>;
   categoryLabelByCountry: Partial<Record<LibraryCountry, string>>;
@@ -145,6 +146,12 @@ function defaultDrawingAssets(article: string): DrawingAsset[] {
   ];
 }
 
+function schneiderRenditionUrl(docRef: string) {
+  return `https://download.schneider-electric.com/files?p_Doc_Ref=${encodeURIComponent(
+    docRef
+  )}&p_File_Type=rendition_369_jpg&default_image=DefaultProductImage.png`;
+}
+
 function buildItem(params: {
   id: string;
   series: string;
@@ -155,6 +162,7 @@ function buildItem(params: {
   titleByCountry: Partial<Record<LibraryCountry, string>>;
   categoryLabelByCountry: Partial<Record<LibraryCountry, string>>;
   productUrl?: string;
+  imageDocRef?: string;
   drawingAssets?: DrawingAsset[];
 }): DeviceLibrarySourceItem {
   return {
@@ -164,64 +172,21 @@ function buildItem(params: {
     category: params.category,
     article: params.article,
     modules: params.modules,
-    catalogImageUrl: makeCatalogPreview({
-      brand: "Schneider",
-      series: params.series,
-      article: params.article,
-      line2: params.category.toUpperCase(),
-    }),
+    catalogImageUrl: params.imageDocRef
+      ? schneiderRenditionUrl(params.imageDocRef)
+      : makeCatalogPreview({
+          brand: "Schneider",
+          series: params.series,
+          article: params.article,
+          line2: params.category.toUpperCase(),
+        }),
+    imageDocRef: params.imageDocRef,
     productUrl: params.productUrl,
     titleByCountry: params.titleByCountry,
     categoryLabelByCountry: params.categoryLabelByCountry,
     countries: params.countries,
     drawingAssets: params.drawingAssets || defaultDrawingAssets(params.article),
   };
-}
-const TURKEY_PRODUCT_URLS: Partial<Record<string, string>> = {
-  EZ9F34140:
-    "https://www.se.com/tr/tr/product/EZ9F34140/otomatik-sigorta-easy9-45ka-ce%C4%9Frisi-1kutup-40a/",
-  EZ9F34220:
-    "https://www.se.com/tr/tr/product/EZ9F34220/minyat%C3%BCr-devre-kesici-mcb-easy9-2p-20a-c-e%C4%9Frisi-4500a-iec-en-608981/",
-  EZ9F34240:
-    "https://www.se.com/tr/tr/product/EZ9F34240/otomatik-sigorta-easy9-45ka-ce%C4%9Frisi-2kutup-40a/",
-  EZ9F34420:
-    "https://www.se.com/tr/tr/product/EZ9F34420/minyat%C3%BCr-devre-kesici-mcb-easy9-4p-20a-c-e%C4%9Frisi-4500a-iec-en-608981/",
-  EZ9F43450:
-    "https://www.se.com/tr/tr/product/EZ9F43450/otomatik-sigorta-easy9-3ka-ce%C4%9Frisi-4kutup-50a/",
-  EZ9F51120:
-    "https://www.se.com/tr/tr/product/EZ9F51120/otomatik-sigorta-easy9-1p-20-a-c-curve-10000-a/",
-  EZ9F51163:
-    "https://www.se.com/tr/tr/product/EZ9F51163/otomatik-sigorta-easy9-1p-63-a-c-curve-10000-a/",
-  EZ9F51210:
-    "https://www.se.com/tr/tr/product/EZ9F51210/otomatik-sigorta-easy9-2p-10-a-c-curve-10000-a/",
-  EZ9F51216:
-    "https://www.se.com/tr/tr/product/EZ9F51216/otomatik-sigorta-easy9-2p-16-a-c-curve-10000-a/",
-  EZ9F51240:
-    "https://www.se.com/tr/tr/product/EZ9F51240/otomatik-sigorta-easy9-2p-40-a-c-curve-10000-a/",
-  EZ9F56240:
-    "https://www.se.com/tr/tr/product/EZ9F56240/easy9-mcb-2p-40a-c-6000a-230v-otomatik-sigorta/",
-  EZ9R34240:
-    "https://www.se.com/tr/tr/product/EZ9R34240/easy9-ka%C3%A7ak-ak%C4%B1m-r%C3%B6lesi-2-kutup-40a-30ma-ac-tipi-230v/",
-};
-
-function resolveCatalogImageUrl(item: DeviceLibrarySourceItem, country: LibraryCountry) {
-  if (country !== "TR") {
-    return item.catalogImageUrl;
-  }
-
-  const productUrl = item.productUrl || TURKEY_PRODUCT_URLS[item.article];
-
-  if (!productUrl) {
-    return item.catalogImageUrl;
-  }
-
-  const params = new URLSearchParams({
-    url: productUrl,
-    article: item.article,
-    series: item.series,
-  });
-
-  return `/api/library/product-image?${params.toString()}`;
 }
 
 function buildTurkeyMcb(
@@ -230,7 +195,8 @@ function buildTurkeyMcb(
   poles: 1 | 2 | 3 | 4,
   rating: number,
   curve: "B" | "C",
-  ka: string
+  ka: string,
+  imageDocRef?: string
 ) {
   return buildItem({
     id: `tr-${article.toLowerCase()}`,
@@ -238,6 +204,7 @@ function buildTurkeyMcb(
     category: "mcb",
     article,
     modules: poles,
+    imageDocRef,
     countries: ["TR"],
     titleByCountry: {
       TR: `${series} otomatik sigorta ${poles}P ${rating}A ${curve} ${ka}`,
@@ -248,13 +215,20 @@ function buildTurkeyMcb(
   });
 }
 
-function buildTurkeyRcd(article: string, poles: 2 | 4, rating: number, sensitivity: string) {
+function buildTurkeyRcd(
+  article: string,
+  poles: 2 | 4,
+  rating: number,
+  sensitivity: string,
+  imageDocRef?: string
+) {
   return buildItem({
     id: `tr-${article.toLowerCase()}`,
     series: "Easy9",
     category: "rcd",
     article,
     modules: poles,
+    imageDocRef,
     countries: ["TR"],
     titleByCountry: {
       TR: `Easy9 kaçak akım koruma şalteri ${poles}P ${rating}A ${sensitivity}`,
@@ -265,13 +239,19 @@ function buildTurkeyRcd(article: string, poles: 2 | 4, rating: number, sensitivi
   });
 }
 
-function buildTurkeyRcbo(article: string, rating: number, sensitivity: string) {
+function buildTurkeyRcbo(
+  article: string,
+  rating: number,
+  sensitivity: string,
+  imageDocRef?: string
+) {
   return buildItem({
     id: `tr-${article.toLowerCase()}`,
     series: "Easy9",
     category: "rcbo",
     article,
     modules: 2,
+    imageDocRef,
     countries: ["TR"],
     titleByCountry: {
       TR: `Easy9 diferansiyel otomatik sigorta 1P+N ${rating}A ${sensitivity}`,
@@ -338,17 +318,17 @@ const staticDevices: DeviceLibrarySourceItem[] = [
   buildTurkeyMcb("EZ9F34120", "Easy9", 1, 20, "C", "4.5kA"),
   buildTurkeyMcb("EZ9F34125", "Easy9", 1, 25, "C", "4.5kA"),
   buildTurkeyMcb("EZ9F34132", "Easy9", 1, 32, "C", "4.5kA"),
-  buildTurkeyMcb("EZ9F34140", "Easy9", 1, 40, "C", "4.5kA"),
+  buildTurkeyMcb("EZ9F34140", "Easy9", 1, 40, "C", "4.5kA", "PB111299"),
   buildTurkeyMcb("EZ9F34150", "Easy9", 1, 50, "C", "4.5kA"),
   buildTurkeyMcb("EZ9F34163", "Easy9", 1, 63, "C", "4.5kA"),
 
   buildTurkeyMcb("EZ9F34206", "Easy9", 2, 6, "C", "4.5kA"),
   buildTurkeyMcb("EZ9F34210", "Easy9", 2, 10, "C", "4.5kA"),
   buildTurkeyMcb("EZ9F34216", "Easy9", 2, 16, "C", "4.5kA"),
-  buildTurkeyMcb("EZ9F34220", "Easy9", 2, 20, "C", "4.5kA"),
+  buildTurkeyMcb("EZ9F34220", "Easy9", 2, 20, "C", "4.5kA", "PB111305"),
   buildTurkeyMcb("EZ9F34225", "Easy9", 2, 25, "C", "4.5kA"),
   buildTurkeyMcb("EZ9F34232", "Easy9", 2, 32, "C", "4.5kA"),
-  buildTurkeyMcb("EZ9F34240", "Easy9", 2, 40, "C", "4.5kA"),
+  buildTurkeyMcb("EZ9F34240", "Easy9", 2, 40, "C", "4.5kA", "PB111306"),
   buildTurkeyMcb("EZ9F34250", "Easy9", 2, 50, "C", "4.5kA"),
   buildTurkeyMcb("EZ9F34263", "Easy9", 2, 63, "C", "4.5kA"),
 
@@ -365,7 +345,7 @@ const staticDevices: DeviceLibrarySourceItem[] = [
   buildTurkeyMcb("EZ9F34406", "Easy9", 4, 6, "C", "4.5kA"),
   buildTurkeyMcb("EZ9F34410", "Easy9", 4, 10, "C", "4.5kA"),
   buildTurkeyMcb("EZ9F34416", "Easy9", 4, 16, "C", "4.5kA"),
-  buildTurkeyMcb("EZ9F34420", "Easy9", 4, 20, "C", "4.5kA"),
+  buildTurkeyMcb("EZ9F34420", "Easy9", 4, 20, "C", "4.5kA", "PB111313"),
   buildTurkeyMcb("EZ9F34425", "Easy9", 4, 25, "C", "4.5kA"),
   buildTurkeyMcb("EZ9F34432", "Easy9", 4, 32, "C", "4.5kA"),
   buildTurkeyMcb("EZ9F34440", "Easy9", 4, 40, "C", "4.5kA"),
@@ -398,7 +378,7 @@ const staticDevices: DeviceLibrarySourceItem[] = [
   buildTurkeyMcb("EZ9F56220", "Easy9", 2, 20, "C", "6kA"),
   buildTurkeyMcb("EZ9F56225", "Easy9", 2, 25, "C", "6kA"),
   buildTurkeyMcb("EZ9F56232", "Easy9", 2, 32, "C", "6kA"),
-  buildTurkeyMcb("EZ9F56240", "Easy9", 2, 40, "C", "6kA"),
+  buildTurkeyMcb("EZ9F56240", "Easy9", 2, 40, "C", "6kA", "PB111330"),
   buildTurkeyMcb("EZ9F56250", "Easy9", 2, 50, "C", "6kA"),
   buildTurkeyMcb("EZ9F56263", "Easy9", 2, 63, "C", "6kA"),
 
@@ -415,20 +395,20 @@ const staticDevices: DeviceLibrarySourceItem[] = [
   buildTurkeyMcb("EZ9F51106", "Easy9", 1, 6, "C", "10kA"),
   buildTurkeyMcb("EZ9F51110", "Easy9", 1, 10, "C", "10kA"),
   buildTurkeyMcb("EZ9F51116", "Easy9", 1, 16, "C", "10kA"),
-  buildTurkeyMcb("EZ9F51120", "Easy9", 1, 20, "C", "10kA"),
+  buildTurkeyMcb("EZ9F51120", "Easy9", 1, 20, "C", "10kA", "PB111351"),
   buildTurkeyMcb("EZ9F51125", "Easy9", 1, 25, "C", "10kA"),
   buildTurkeyMcb("EZ9F51132", "Easy9", 1, 32, "C", "10kA"),
   buildTurkeyMcb("EZ9F51140", "Easy9", 1, 40, "C", "10kA"),
   buildTurkeyMcb("EZ9F51150", "Easy9", 1, 50, "C", "10kA"),
-  buildTurkeyMcb("EZ9F51163", "Easy9", 1, 63, "C", "10kA"),
+  buildTurkeyMcb("EZ9F51163", "Easy9", 1, 63, "C", "10kA", "PB111355"),
 
   buildTurkeyMcb("EZ9F51206", "Easy9", 2, 6, "C", "10kA"),
-  buildTurkeyMcb("EZ9F51210", "Easy9", 2, 10, "C", "10kA"),
-  buildTurkeyMcb("EZ9F51216", "Easy9", 2, 16, "C", "10kA"),
+  buildTurkeyMcb("EZ9F51210", "Easy9", 2, 10, "C", "10kA", "PB111356"),
+  buildTurkeyMcb("EZ9F51216", "Easy9", 2, 16, "C", "10kA", "PB111357"),
   buildTurkeyMcb("EZ9F51220", "Easy9", 2, 20, "C", "10kA"),
   buildTurkeyMcb("EZ9F51225", "Easy9", 2, 25, "C", "10kA"),
   buildTurkeyMcb("EZ9F51232", "Easy9", 2, 32, "C", "10kA"),
-  buildTurkeyMcb("EZ9F51240", "Easy9", 2, 40, "C", "10kA"),
+  buildTurkeyMcb("EZ9F51240", "Easy9", 2, 40, "C", "10kA", "PB111360"),
   buildTurkeyMcb("EZ9F51250", "Easy9", 2, 50, "C", "10kA"),
   buildTurkeyMcb("EZ9F51263", "Easy9", 2, 63, "C", "10kA"),
 
@@ -453,7 +433,7 @@ const staticDevices: DeviceLibrarySourceItem[] = [
   buildTurkeyMcb("EZ9F57463", "Easy9 Pro", 4, 63, "C", "6kA"),
 
   buildTurkeyRcd("EZ9R34225", 2, 25, "30mA"),
-  buildTurkeyRcd("EZ9R34240", 2, 40, "30mA"),
+  buildTurkeyRcd("EZ9R34240", 2, 40, "30mA", "PB111381"),
   buildTurkeyRcd("EZ9R34263", 2, 63, "30mA"),
   buildTurkeyRcd("EZ9R34425", 4, 25, "30mA"),
   buildTurkeyRcd("EZ9R34440", 4, 40, "30mA"),
@@ -481,7 +461,7 @@ export function getStaticDeviceLibrary(country: LibraryCountry): DeviceLibraryIt
         fullCategoryLabel(country, item.category),
       article: item.article,
       modules: item.modules,
-      catalogImageUrl: resolveCatalogImageUrl(item, country),
+      catalogImageUrl: item.catalogImageUrl,
       productUrl: item.productUrl,
       name:
         item.titleByCountry[country] ||
