@@ -6,8 +6,11 @@ import { getProjectById, saveProject } from "@/lib/projects";
 import DeviceLibraryModal from "@/components/DeviceLibraryModal";
 import type {
   DeviceLibraryItem,
+  DrawingAsset,
   LibraryCountry,
 } from "@/lib/device-library";
+import type { CadAsset, CadPrimitive } from "@/lib/cad-types";
+import { createMockCadAssetFromDrawing } from "@/lib/cad-mock";
 
 type Tool =
   | "select"
@@ -40,7 +43,7 @@ type BaseShape = ShapeStyle & {
     | "cable"
     | "socket"
     | "switch"
-    | "device";
+    | "cad";
   label: string;
   groupName?: string;
   cableType?: string;
@@ -92,19 +95,20 @@ type SwitchShape = BaseShape & {
   height: number;
 };
 
-type DeviceShape = BaseShape & {
-  type: "device";
+type CadShape = BaseShape & {
+  type: "cad";
   x: number;
   y: number;
   width: number;
   height: number;
-  imageUrl?: string;
+  assetId: string;
   article: string;
   brand: string;
   series: string;
   modules: number;
   categoryLabel: string;
   country: LibraryCountry;
+  layerState: Record<string, boolean>;
 };
 
 type Shape =
@@ -113,7 +117,7 @@ type Shape =
   | LineShape
   | SocketShape
   | SwitchShape
-  | DeviceShape;
+  | CadShape;
 
 type CalibrationPoint = {
   x: number;
@@ -149,6 +153,7 @@ type InteractionState = {
 
 type HistoryState = {
   shapes: Shape[];
+  cadAssets: CadAsset[];
   calibrationPoints: CalibrationPoint[];
   metersPerPixel: number;
   projectName: string;
@@ -198,6 +203,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   const [projectName, setProjectName] = useState("Project");
   const [tool, setTool] = useState<Tool>("select");
   const [shapes, setShapes] = useState<Shape[]>([]);
+  const [cadAssets, setCadAssets] = useState<CadAsset[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draftLine, setDraftLine] = useState<LineShape | null>(null);
   const [interaction, setInteraction] = useState<InteractionState | null>(null);
@@ -225,6 +231,11 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     [shapes, selectedId]
   );
 
+  const selectedCadAsset = useMemo(() => {
+    if (!selectedShape || selectedShape.type !== "cad") return null;
+    return cadAssets.find((asset) => asset.id === selectedShape.assetId) || null;
+  }, [selectedShape, cadAssets]);
+
   const estimate = useMemo(
     () => buildEstimate(shapes, metersPerPixel),
     [shapes, metersPerPixel]
@@ -235,11 +246,13 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
     if (saved) {
       const nextShapes = (saved.data?.shapes || []) as Shape[];
+      const nextCadAssets = (saved.data?.cadAssets || []) as CadAsset[];
       const nextMetersPerPixel = Number(saved.data?.metersPerPixel || 0);
       const nextCalibration = (saved.data?.calibrationPoints || []) as CalibrationPoint[];
 
       setProjectName(saved.name || "Project");
       setShapes(nextShapes);
+      setCadAssets(nextCadAssets);
       setMetersPerPixel(nextMetersPerPixel);
       setCalibrationPoints(nextCalibration);
       setLibraryCountry((saved.data?.libraryCountry as LibraryCountry) || "FR");
@@ -247,6 +260,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
       const initial: HistoryState = {
         shapes: cloneDeep(nextShapes),
+        cadAssets: cloneDeep(nextCadAssets),
         calibrationPoints: cloneDeep(nextCalibration),
         metersPerPixel: nextMetersPerPixel,
         projectName: saved.name || "Project",
@@ -257,6 +271,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     } else {
       const initial: HistoryState = {
         shapes: [],
+        cadAssets: [],
         calibrationPoints: [],
         metersPerPixel: 0,
         projectName: "Project",
@@ -281,6 +296,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       persistProjectData(
         {
           shapes,
+          cadAssets,
           calibrationPoints,
           metersPerPixel,
           projectName,
@@ -291,7 +307,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [loaded, projectId, shapes, calibrationPoints, metersPerPixel, projectName, libraryCountry]);
+  }, [loaded, projectId, shapes, cadAssets, calibrationPoints, metersPerPixel, projectName, libraryCountry]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -362,6 +378,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       updatedAt: now,
       data: {
         shapes: data.shapes,
+        cadAssets: data.cadAssets,
         metersPerPixel: data.metersPerPixel,
         calibrationPoints: data.calibrationPoints,
         libraryCountry,
@@ -383,6 +400,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     persistProjectData(
       {
         shapes,
+        cadAssets,
         calibrationPoints,
         metersPerPixel,
         projectName,
@@ -409,12 +427,14 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
   function commitHistory(
     nextShapes?: Shape[],
+    nextCadAssets?: CadAsset[],
     nextCalibrationPoints?: CalibrationPoint[],
     nextMetersPerPixel?: number,
     nextProjectName?: string
   ) {
     const nextState: HistoryState = {
       shapes: cloneDeep(nextShapes ?? shapes),
+      cadAssets: cloneDeep(nextCadAssets ?? cadAssets),
       calibrationPoints: cloneDeep(nextCalibrationPoints ?? calibrationPoints),
       metersPerPixel: nextMetersPerPixel ?? metersPerPixel,
       projectName: nextProjectName ?? projectName,
@@ -426,6 +446,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
   function applyHistoryState(state: HistoryState) {
     setShapes(cloneDeep(state.shapes));
+    setCadAssets(cloneDeep(state.cadAssets));
     setCalibrationPoints(cloneDeep(state.calibrationPoints));
     setMetersPerPixel(state.metersPerPixel);
     setProjectName(state.projectName);
@@ -512,6 +533,26 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     });
   }
 
+  function setCadLayerVisibility(shapeId: string, layerId: string, visible: boolean) {
+    setShapes((prev) => {
+      const next = prev.map((shape) => {
+        if (shape.id !== shapeId) return shape;
+        if (shape.type !== "cad") return shape;
+
+        return {
+          ...shape,
+          layerState: {
+            ...shape.layerState,
+            [layerId]: visible,
+          },
+        };
+      });
+
+      window.setTimeout(() => commitHistory(next), 0);
+      return next;
+    });
+  }
+
   function nudgeSelected(dx: number, dy: number) {
     if (!selectedId) return;
 
@@ -563,7 +604,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       return copy;
     }
 
-    if (copy.type === "device") {
+    if (copy.type === "cad") {
       copy.x += 20;
       copy.y += 20;
       return copy;
@@ -620,27 +661,32 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     });
   }
 
-  function addDeviceFromLibrary(item: DeviceLibraryItem) {
-    const modules = Math.max(1, item.modules || 1);
-    const width = Math.max(60, modules * 42);
-    const height = 120;
+  function addCadFromLibrary(item: DeviceLibraryItem, drawingAsset: DrawingAsset) {
+    const cadAsset = createMockCadAssetFromDrawing(item, drawingAsset);
 
     const centerWorld = screenToWorld(canvasSize.width / 2, canvasSize.height / 2);
+    const width = cadAsset.bounds.width;
+    const height = cadAsset.bounds.height;
 
-    const shape: DeviceShape = {
+    const layerState = Object.fromEntries(
+      cadAsset.layers.map((layer) => [layer.id, layer.visible])
+    );
+
+    const shape: CadShape = {
       id: crypto.randomUUID(),
-      type: "device",
+      type: "cad",
       x: centerWorld.x - width / 2,
       y: centerWorld.y - height / 2,
       width,
       height,
-      imageUrl: item.catalogImageUrl,
+      assetId: cadAsset.id,
       article: item.article,
       brand: item.brand,
       series: item.series,
       modules: item.modules,
       categoryLabel: item.categoryLabel,
       country: item.country,
+      layerState,
       label: item.name,
       groupName: "",
       cableType: "",
@@ -649,10 +695,16 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       opacity: 1,
     };
 
-    setShapes((prev) => {
-      const next = [...prev, shape];
-      window.setTimeout(() => commitHistory(next), 0);
-      return next;
+    setCadAssets((prevAssets) => {
+      const nextAssets = [...prevAssets, cadAsset];
+
+      setShapes((prevShapes) => {
+        const nextShapes = [...prevShapes, shape];
+        window.setTimeout(() => commitHistory(nextShapes, nextAssets), 0);
+        return nextShapes;
+      });
+
+      return nextAssets;
     });
 
     setSelectedId(shape.id);
@@ -674,10 +726,10 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
           const nextMetersPerPixel = meters / px;
           setMetersPerPixel(nextMetersPerPixel);
           setStatus(`Масштаб задан: ${meters.toFixed(2)} м на ${px.toFixed(0)} px`);
-          window.setTimeout(() => commitHistory(shapes, next, nextMetersPerPixel), 0);
+          window.setTimeout(() => commitHistory(shapes, cadAssets, next, nextMetersPerPixel), 0);
         }
       } else {
-        window.setTimeout(() => commitHistory(shapes, next), 0);
+        window.setTimeout(() => commitHistory(shapes, cadAssets, next), 0);
       }
       return;
     }
@@ -1021,6 +1073,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
   function clearAllConfirmed() {
     setShapes([]);
+    setCadAssets([]);
     setSelectedId(null);
     setDraftLine(null);
     setCalibrationPoints([]);
@@ -1029,7 +1082,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     setHoverAnchorState(null);
     setShowClearConfirm(false);
     setStatus("Проект очищен");
-    window.setTimeout(() => commitHistory([], [], 0), 0);
+    window.setTimeout(() => commitHistory([], [], [], 0), 0);
   }
 
   const objectTypeOptions =
@@ -1040,8 +1093,8 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
             { value: "line", label: "Линия" },
             { value: "cable", label: "Кабель" },
           ]
-        : selectedShape.type === "device"
-          ? [{ value: "device", label: "Устройство" }]
+        : selectedShape.type === "cad"
+          ? [{ value: "cad", label: "CAD объект" }]
           : [
               { value: "rectangle", label: "Прямоугольник" },
               { value: "circle", label: "Окружность" },
@@ -1063,7 +1116,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
               const value = e.target.value;
               setProjectName(value);
               window.setTimeout(
-                () => commitHistory(shapes, calibrationPoints, metersPerPixel, value),
+                () => commitHistory(shapes, cadAssets, calibrationPoints, metersPerPixel, value),
                 0
               );
             }}
@@ -1156,12 +1209,12 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
                 {shapes.map((shape) => (
                   <React.Fragment key={shape.id}>
-                    {renderShape(shape, selectedId === shape.id)}
+                    {renderShape(shape, selectedId === shape.id, cadAssets)}
                     {selectedId === shape.id ? renderSelectionOverlay(shape) : null}
                   </React.Fragment>
                 ))}
 
-                {draftLine ? renderShape(draftLine, true) : null}
+                {draftLine ? renderShape(draftLine, true, cadAssets) : null}
 
                 {hoverAnchorState ? (
                   <g pointerEvents="none">
@@ -1285,7 +1338,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
                   />
                 </div>
 
-                {selectedShape.type === "device" ? (
+                {selectedShape.type === "cad" ? (
                   <>
                     <div style={styles.compactField}>
                       <label style={styles.label}>Артикул</label>
@@ -1305,6 +1358,19 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
                     <div style={styles.compactField}>
                       <label style={styles.label}>Страна каталога</label>
                       <input value={selectedShape.country} readOnly style={styles.inputCompact} />
+                    </div>
+
+                    <div style={styles.compactField}>
+                      <label style={styles.label}>Источник CAD</label>
+                      <input
+                        value={
+                          selectedCadAsset
+                            ? `${selectedCadAsset.sourceLabel || ""} (${selectedCadAsset.sourceFormat.toUpperCase()})`
+                            : ""
+                        }
+                        readOnly
+                        style={styles.inputCompact}
+                      />
                     </div>
                   </>
                 ) : null}
@@ -1436,6 +1502,31 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
             )}
           </div>
 
+          {selectedShape?.type === "cad" && selectedCadAsset ? (
+            <div style={styles.card}>
+              <div style={styles.cardTitle}>Слои CAD</div>
+
+              <div style={{ display: "grid", gap: 8 }}>
+                {selectedCadAsset.layers.map((layer) => {
+                  const visible = selectedShape.layerState[layer.id] ?? layer.visible;
+
+                  return (
+                    <label key={layer.id} style={styles.layerRow}>
+                      <input
+                        type="checkbox"
+                        checked={visible}
+                        onChange={(e) =>
+                          setCadLayerVisibility(selectedShape.id, layer.id, e.target.checked)
+                        }
+                      />
+                      <span>{layer.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
           <div style={styles.card}>
             <div style={styles.cardTitle}>Смета</div>
             {estimate.length === 0 ? (
@@ -1485,7 +1576,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
         initialCountry={libraryCountry}
         onClose={() => setShowLibrary(false)}
         onCountryChange={setLibraryCountry}
-        onAdd={addDeviceFromLibrary}
+        onAdd={addCadFromLibrary}
       />
 
       {showHelp ? (
@@ -1606,7 +1697,7 @@ function MiniMap({
             );
           }
 
-          if (shape.type === "rectangle" || shape.type === "device") {
+          if (shape.type === "rectangle" || shape.type === "cad") {
             const p = worldToMini(shape.x, shape.y);
             return (
               <rect
@@ -1681,7 +1772,7 @@ function Modal({
   );
 }
 
-function renderShape(shape: Shape, selected: boolean) {
+function renderShape(shape: Shape, selected: boolean, cadAssets: CadAsset[]) {
   const stroke = shape.strokeColor;
   const fill =
     shape.type === "line" || shape.type === "cable"
@@ -1806,9 +1897,33 @@ function renderShape(shape: Shape, selected: boolean) {
     );
   }
 
-  if (shape.type === "device") {
+  if (shape.type === "cad") {
+    const asset = cadAssets.find((item) => item.id === shape.assetId);
     const cx = shape.x + shape.width / 2;
     const cy = shape.y + shape.height / 2;
+
+    if (!asset) {
+      return (
+        <g transform={`rotate(${shape.rotation} ${cx} ${cy})`}>
+          <rect
+            x={shape.x}
+            y={shape.y}
+            width={shape.width}
+            height={shape.height}
+            rx="10"
+            fill="rgba(255,255,255,0.03)"
+            stroke={stroke}
+            strokeWidth={sw}
+          />
+          <text x={shape.x + 8} y={shape.y + 20} fill="#f2f6ff" fontSize="12">
+            CAD asset not found
+          </text>
+        </g>
+      );
+    }
+
+    const scaleX = shape.width / Math.max(1, asset.bounds.width);
+    const scaleY = shape.height / Math.max(1, asset.bounds.height);
 
     return (
       <g transform={`rotate(${shape.rotation} ${cx} ${cy})`}>
@@ -1818,40 +1933,91 @@ function renderShape(shape: Shape, selected: boolean) {
           width={shape.width}
           height={shape.height}
           rx="10"
-          fill={hexToRgba(shape.fillColor, 0.95)}
-          stroke={stroke}
-          strokeWidth={sw}
+          fill="rgba(255,255,255,0.02)"
+          stroke={selected ? "#9ec1ff" : "rgba(255,255,255,0.18)"}
+          strokeWidth={selected ? 2 : 1}
         />
 
-        {shape.imageUrl ? (
-          <image
-            href={shape.imageUrl}
-            x={shape.x + 8}
-            y={shape.y + 8}
-            width={shape.width - 16}
-            height={shape.height - 34}
-            preserveAspectRatio="xMidYMid meet"
-          />
-        ) : null}
+        <g transform={`translate(${shape.x} ${shape.y}) scale(${scaleX} ${scaleY})`}>
+          {asset.primitives.map((primitive, index) =>
+            renderCadPrimitive(
+              primitive,
+              `${shape.id}-${index}`,
+              shape.layerState[primitive.layerId] ?? true
+            )
+          )}
+        </g>
 
-        <text
-          x={shape.x + 8}
-          y={shape.y + shape.height - 10}
-          fill="#f2f6ff"
-          fontSize="11"
-        >
-          {shape.article}
-        </text>
-
-        <text
-          x={shape.x}
-          y={shape.y - 10}
-          fill="#f2f6ff"
-          fontSize="14"
-        >
+        <text x={shape.x} y={shape.y - 10} fill="#f2f6ff" fontSize="14">
           {shape.label}
         </text>
       </g>
+    );
+  }
+
+  return null;
+}
+
+function renderCadPrimitive(
+  primitive: CadPrimitive,
+  key: string,
+  visible: boolean
+) {
+  if (!visible) return null;
+
+  if (primitive.type === "line") {
+    return (
+      <line
+        key={key}
+        x1={primitive.x1}
+        y1={primitive.y1}
+        x2={primitive.x2}
+        y2={primitive.y2}
+        stroke={primitive.stroke || "#dce7ff"}
+        strokeWidth={primitive.strokeWidth || 1}
+      />
+    );
+  }
+
+  if (primitive.type === "polyline") {
+    const points = primitive.points.map((p) => `${p.x},${p.y}`).join(" ");
+    return (
+      <polyline
+        key={key}
+        points={points}
+        fill={primitive.closed ? primitive.fill || "none" : "none"}
+        stroke={primitive.stroke || "#dce7ff"}
+        strokeWidth={primitive.strokeWidth || 1}
+        {...(primitive.closed ? { polygonRendering: "geometricPrecision" } : {})}
+      />
+    );
+  }
+
+  if (primitive.type === "circle") {
+    return (
+      <circle
+        key={key}
+        cx={primitive.cx}
+        cy={primitive.cy}
+        r={primitive.r}
+        fill={primitive.fill || "none"}
+        stroke={primitive.stroke || "#dce7ff"}
+        strokeWidth={primitive.strokeWidth || 1}
+      />
+    );
+  }
+
+  if (primitive.type === "text") {
+    return (
+      <text
+        key={key}
+        x={primitive.x}
+        y={primitive.y}
+        fill={primitive.fill || "#f2f6ff"}
+        fontSize={primitive.size || 12}
+      >
+        {primitive.text}
+      </text>
     );
   }
 
@@ -1888,7 +2054,7 @@ function renderSelectionOverlay(shape: Shape) {
     shape.type === "rectangle" ||
     shape.type === "socket" ||
     shape.type === "switch" ||
-    shape.type === "device"
+    shape.type === "cad"
   ) {
     const geometry = getSelectionGeometry(shape);
     return (
@@ -1915,7 +2081,7 @@ function renderSelectionOverlay(shape: Shape) {
 }
 
 function convertShapeType(shape: Shape, nextType: Shape["type"]): Shape {
-  if (shape.type === "device" || nextType === "device") {
+  if (shape.type === "cad" || nextType === "cad") {
     return shape;
   }
 
@@ -2043,7 +2209,7 @@ function convertShapeType(shape: Shape, nextType: Shape["type"]): Shape {
 }
 
 function getShapeCenter(shape: Shape) {
-  if (shape.type === "rectangle" || shape.type === "device") {
+  if (shape.type === "rectangle" || shape.type === "cad") {
     return { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 };
   }
   if (shape.type === "circle") {
@@ -2087,8 +2253,8 @@ function transformShape(
       return { ...shape, x: s.x + dx, y: s.y + dy };
     }
 
-    if (shape.type === "device") {
-      const s = initial as DeviceShape;
+    if (shape.type === "cad") {
+      const s = initial as CadShape;
       return { ...shape, x: s.x + dx, y: s.y + dy };
     }
 
@@ -2139,8 +2305,8 @@ function transformShape(
       };
     }
 
-    if (shape.type === "device") {
-      const s = initial as DeviceShape;
+    if (shape.type === "cad") {
+      const s = initial as CadShape;
       return {
         ...shape,
         width: Math.max(40, s.width + dx),
@@ -2166,8 +2332,8 @@ function transformShape(
       return { ...shape, rotation: angleDeg(cx, cy, point.x, point.y) + 90 };
     }
 
-    if (shape.type === "device") {
-      const s = initial as DeviceShape;
+    if (shape.type === "cad") {
+      const s = initial as CadShape;
       const cx = s.x + s.width / 2;
       const cy = s.y + s.height / 2;
       return { ...shape, rotation: angleDeg(cx, cy, point.x, point.y) + 90 };
@@ -2201,7 +2367,7 @@ function hitTestHandle(px: number, py: number, shape: Shape): HandleType | null 
     shape.type === "rectangle" ||
     shape.type === "socket" ||
     shape.type === "switch" ||
-    shape.type === "device"
+    shape.type === "cad"
   ) {
     const geometry = getSelectionGeometry(shape);
     if (distance(px, py, geometry.rotateHandle.x, geometry.rotateHandle.y) <= 12) return "rotate";
@@ -2212,9 +2378,9 @@ function hitTestHandle(px: number, py: number, shape: Shape): HandleType | null 
 }
 
 function getSelectionGeometry(
-  shape: RectangleShape | SocketShape | SwitchShape | DeviceShape
+  shape: RectangleShape | SocketShape | SwitchShape | CadShape
 ) {
-  if (shape.type === "rectangle" || shape.type === "device") {
+  if (shape.type === "rectangle" || shape.type === "cad") {
     const cx = shape.x + shape.width / 2;
     const cy = shape.y + shape.height / 2;
 
@@ -2298,7 +2464,7 @@ function getShapeAnchors(shape: Shape): AnchorPoint[] {
     );
   }
 
-  if (shape.type === "device") {
+  if (shape.type === "cad") {
     const cx = shape.x + shape.width / 2;
     const cy = shape.y + shape.height / 2;
     const raw = [
@@ -2428,7 +2594,7 @@ function lineLengthMeters(shape: LineShape, metersPerPixel: number) {
 }
 
 function isPointOnShape(px: number, py: number, shape: Shape) {
-  if (shape.type === "rectangle") {
+  if (shape.type === "rectangle" || shape.type === "cad") {
     return px >= shape.x && px <= shape.x + shape.width && py >= shape.y && py <= shape.y + shape.height;
   }
 
@@ -2446,15 +2612,6 @@ function isPointOnShape(px: number, py: number, shape: Shape) {
       px <= shape.x + shape.width / 2 &&
       py >= shape.y - shape.height / 2 &&
       py <= shape.y + shape.height / 2
-    );
-  }
-
-  if (shape.type === "device") {
-    return (
-      px >= shape.x &&
-      px <= shape.x + shape.width &&
-      py >= shape.y &&
-      py <= shape.y + shape.height
     );
   }
 
@@ -2956,5 +3113,12 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 10,
     padding: "9px 12px",
     cursor: "pointer",
+  },
+  layerRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 13,
+    color: "#dce7ff",
   },
 };
