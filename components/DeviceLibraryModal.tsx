@@ -3,9 +3,41 @@
 import React, { useEffect, useState } from "react";
 import {
   libraryCountries,
+  fullCategoryLabel,
   type DeviceLibraryItem,
   type LibraryCountry,
 } from "@/lib/device-library";
+
+function fallbackImage(title: string, article: string) {
+  const svg = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240">
+    <rect width="240" height="240" rx="20" fill="#ffffff"/>
+    <rect x="24" y="18" width="192" height="204" rx="16" fill="#f3f6fb" stroke="#cfd8ea" stroke-width="2"/>
+    <rect x="58" y="72" width="124" height="92" rx="10" fill="#e5e7eb" stroke="#9ca3af" stroke-width="2"/>
+    <rect x="72" y="84" width="28" height="68" rx="6" fill="#d1d5db"/>
+    <rect x="110" y="84" width="56" height="16" rx="4" fill="#111827"/>
+    <rect x="110" y="108" width="42" height="10" rx="4" fill="#9ca3af"/>
+    <rect x="110" y="126" width="46" height="10" rx="4" fill="#9ca3af"/>
+    <rect x="110" y="144" width="32" height="10" rx="4" fill="#9ca3af"/>
+    <text x="120" y="194" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#111827">${escapeXml(
+      article
+    )}</text>
+    <text x="120" y="214" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#4b5563">${escapeXml(
+      title.slice(0, 28)
+    )}</text>
+  </svg>`;
+
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function escapeXml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
 
 export default function DeviceLibraryModal({
   open,
@@ -76,7 +108,9 @@ export default function DeviceLibraryModal({
         <div style={styles.header}>
           <div>
             <div style={styles.title}>Библиотека</div>
-            <div style={styles.subtitle}>Schneider Electric · Этап 1</div>
+            <div style={styles.subtitle}>
+              Schneider Electric · {items.length} поз.
+            </div>
           </div>
 
           <button style={styles.closeBtn} onClick={onClose}>
@@ -107,15 +141,15 @@ export default function DeviceLibraryModal({
             style={styles.input}
           >
             <option value="">Все категории</option>
-            <option value="mcb">MCB</option>
-            <option value="rcd">RCD</option>
-            <option value="rcbo">RCBO</option>
+            <option value="mcb">{fullCategoryLabel(country, "mcb")}</option>
+            <option value="rcd">{fullCategoryLabel(country, "rcd")}</option>
+            <option value="rcbo">{fullCategoryLabel(country, "rcbo")}</option>
           </select>
 
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Поиск по названию или артикулу"
+            placeholder="Поиск по названию, серии или артикулу"
             style={styles.input}
           />
         </div>
@@ -133,14 +167,24 @@ export default function DeviceLibraryModal({
                     src={item.imageUrl}
                     alt={item.name}
                     style={styles.image}
+                    onError={(e) => {
+                      const target = e.currentTarget;
+                      target.src = fallbackImage(item.name, item.article);
+                    }}
                   />
                 </div>
 
                 <div style={styles.info}>
                   <div style={styles.name}>{item.name}</div>
+
                   <div style={styles.meta}>
-                    {item.series} · {item.categoryLabel}
+                    {item.brand} · {item.series}
                   </div>
+
+                  <div style={styles.meta}>
+                    {item.categoryLabel}
+                  </div>
+
                   <div style={styles.meta}>
                     Артикул: {item.article} · {item.modules} мод.
                   </div>
@@ -217,7 +261,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   filters: {
     display: "grid",
-    gridTemplateColumns: "180px 160px 1fr",
+    gridTemplateColumns: "180px 240px 1fr",
     gap: 10,
     padding: 16,
     borderBottom: "1px solid #26305b",
