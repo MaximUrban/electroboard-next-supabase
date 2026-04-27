@@ -713,57 +713,69 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     setShowLibrary(false);
   }
 
-  function importDrawingFile(file: File) {
-  const cadAsset = createMockCadAssetFromImportedFile(file);
+  async function importDrawingFile(file: File) {
+  try {
+    setStatus(`Импорт: ${file.name}...`);
 
-  const fitWidth = 900;
-  const scale = fitWidth / Math.max(1, cadAsset.bounds.width);
-  const width = cadAsset.bounds.width * scale;
-  const height = cadAsset.bounds.height * scale;
+    const cadAsset = await createMockCadAssetFromImportedFile(file);
 
-  const centerWorld = screenToWorld(canvasSize.width / 2, canvasSize.height / 2);
+    const fitWidth = 900;
+    const scale = fitWidth / Math.max(1, cadAsset.bounds.width);
+    const width = cadAsset.bounds.width * scale;
+    const height = cadAsset.bounds.height * scale;
 
-  const layerState = Object.fromEntries(
-    cadAsset.layers.map((layer) => [layer.id, layer.visible])
-  );
+    const centerWorld = screenToWorld(canvasSize.width / 2, canvasSize.height / 2);
 
-  const shape: CadShape = {
-    id: crypto.randomUUID(),
-    type: "cad",
-    x: centerWorld.x - width / 2,
-    y: centerWorld.y - height / 2,
-    width,
-    height,
-    assetId: cadAsset.id,
-    article: file.name,
-    brand: "Imported",
-    series: "Drawing",
-    modules: 0,
-    categoryLabel: "Imported drawing",
-    country: "TR",
-    layerState,
-    label: file.name,
-    groupName: "",
-    cableType: "",
-    ...defaultStyle,
-    fillColor: "#1b2347",
-    opacity: 1,
-  };
+    const layerState = Object.fromEntries(
+      cadAsset.layers.map((layer) => [layer.id, layer.visible])
+    );
 
-  setCadAssets((prevAssets) => {
-    const nextAssets = [...prevAssets, cadAsset];
+    const shape: CadShape = {
+      id: crypto.randomUUID(),
+      type: "cad",
+      x: centerWorld.x - width / 2,
+      y: centerWorld.y - height / 2,
+      width,
+      height,
+      assetId: cadAsset.id,
+      article: file.name,
+      brand: "Imported",
+      series: "Drawing",
+      modules: 0,
+      categoryLabel: "Imported drawing",
+      country: "TR",
+      layerState,
+      label: file.name,
+      groupName: "",
+      cableType: "",
+      ...defaultStyle,
+      fillColor: "#1b2347",
+      opacity: 1,
+    };
 
-    setShapes((prevShapes) => {
-      const nextShapes = [...prevShapes, shape];
-      window.setTimeout(() => commitHistory(nextShapes, nextAssets), 0);
-      return nextShapes;
+    setCadAssets((prevAssets) => {
+      const nextAssets = [...prevAssets, cadAsset];
+
+      setShapes((prevShapes) => {
+        const nextShapes = [...prevShapes, shape];
+        window.setTimeout(() => commitHistory(nextShapes, nextAssets), 0);
+        return nextShapes;
+      });
+
+      return nextAssets;
     });
 
-    return nextAssets;
-  });
+    setSelectedId(shape.id);
 
-  setSelectedId(shape.id);
-  setStatus(`Импортирован чертёж: ${file.name}`);
+    if (cadAsset.sourceFormat === "dxf") {
+      setStatus(`DXF импортирован: ${file.name}`);
+    } else {
+      setStatus(`Импортирован mock-чертёж: ${file.name}`);
+    }
+  } catch (error) {
+    console.error(error);
+    setStatus(`Ошибка импорта: ${file.name}`);
+  }
 }
 
   function handleCanvasMouseDown(e: React.MouseEvent<SVGSVGElement>) {
@@ -1167,14 +1179,13 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
           <input
             value={projectName}
-            onChange={(e) => {
-              const value = e.target.value;
-              setProjectName(value);
-              window.setTimeout(
-                () => commitHistory(shapes, cadAssets, calibrationPoints, metersPerPixel, value),
-                0
-              );
-            }}
+            onChange={async (e) => {
+  const file = e.target.files?.[0];
+  if (file) {
+    await importDrawingFile(file);
+  }
+  e.currentTarget.value = "";
+}}
             style={styles.projectInput}
           />
         </div>
