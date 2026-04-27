@@ -1898,33 +1898,11 @@ function renderShape(shape: Shape, selected: boolean, cadAssets: CadAsset[]) {
   }
 
   if (shape.type === "cad") {
-    const asset = cadAssets.find((item) => item.id === shape.assetId);
-    const cx = shape.x + shape.width / 2;
-    const cy = shape.y + shape.height / 2;
+  const asset = cadAssets.find((item) => item.id === shape.assetId);
+  const cx = shape.x + shape.width / 2;
+  const cy = shape.y + shape.height / 2;
 
-    if (!asset) {
-      return (
-        <g transform={`rotate(${shape.rotation} ${cx} ${cy})`}>
-          <rect
-            x={shape.x}
-            y={shape.y}
-            width={shape.width}
-            height={shape.height}
-            rx="10"
-            fill="rgba(255,255,255,0.03)"
-            stroke={stroke}
-            strokeWidth={sw}
-          />
-          <text x={shape.x + 8} y={shape.y + 20} fill="#f2f6ff" fontSize="12">
-            CAD asset not found
-          </text>
-        </g>
-      );
-    }
-
-    const scaleX = shape.width / Math.max(1, asset.bounds.width);
-    const scaleY = shape.height / Math.max(1, asset.bounds.height);
-
+  if (!asset) {
     return (
       <g transform={`rotate(${shape.rotation} ${cx} ${cy})`}>
         <rect
@@ -1933,27 +1911,62 @@ function renderShape(shape: Shape, selected: boolean, cadAssets: CadAsset[]) {
           width={shape.width}
           height={shape.height}
           rx="10"
-          fill="rgba(255,255,255,0.02)"
-          stroke={selected ? "#9ec1ff" : "rgba(255,255,255,0.18)"}
-          strokeWidth={selected ? 2 : 1}
+          fill="rgba(255,255,255,0.03)"
+          stroke={stroke}
+          strokeWidth={sw}
         />
-
-        <g transform={`translate(${shape.x} ${shape.y}) scale(${scaleX} ${scaleY})`}>
-          {asset.primitives.map((primitive, index) =>
-            renderCadPrimitive(
-              primitive,
-              `${shape.id}-${index}`,
-              shape.layerState[primitive.layerId] ?? true
-            )
-          )}
-        </g>
-
-        <text x={shape.x} y={shape.y - 10} fill="#f2f6ff" fontSize="14">
-          {shape.label}
+        <text x={shape.x + 8} y={shape.y + 20} fill="#f2f6ff" fontSize="12">
+          CAD asset not found
         </text>
       </g>
     );
   }
+
+  const scaleX = shape.width / Math.max(1, asset.bounds.width);
+  const scaleY = shape.height / Math.max(1, asset.bounds.height);
+  const previewVisible = shape.layerState["preview"] ?? true;
+
+  return (
+    <g transform={`rotate(${shape.rotation} ${cx} ${cy})`}>
+      <rect
+        x={shape.x}
+        y={shape.y}
+        width={shape.width}
+        height={shape.height}
+        rx="10"
+        fill="rgba(255,255,255,0.02)"
+        stroke={selected ? "#9ec1ff" : "rgba(255,255,255,0.18)"}
+        strokeWidth={selected ? 2 : 1}
+      />
+
+      {asset.previewUrl && previewVisible ? (
+        <image
+          href={asset.previewUrl}
+          x={shape.x + 6}
+          y={shape.y + 6}
+          width={shape.width - 12}
+          height={shape.height - 12}
+          preserveAspectRatio="xMidYMid meet"
+          opacity={0.28}
+        />
+      ) : null}
+
+      <g transform={`translate(${shape.x} ${shape.y}) scale(${scaleX} ${scaleY})`}>
+        {asset.primitives.map((primitive, index) =>
+          renderCadPrimitive(
+            primitive,
+            `${shape.id}-${index}`,
+            shape.layerState[primitive.layerId] ?? true
+          )
+        )}
+      </g>
+
+      <text x={shape.x} y={shape.y - 10} fill="#f2f6ff" fontSize="14">
+        {shape.label}
+      </text>
+    </g>
+  );
+}
 
   return null;
 }
