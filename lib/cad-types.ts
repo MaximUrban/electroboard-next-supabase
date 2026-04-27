@@ -60,7 +60,10 @@ export type CadAsset = {
   sourceFormat: "dwg" | "dxf" | "pdf" | "jpg" | "png";
   sourceUrl?: string;
   sourceLabel?: string;
+  sourceName?: string;
   previewUrl?: string;
+  importedFileName?: string;
+  importMode?: "library" | "drawing-import";
   layers: CadLayer[];
   primitives: CadPrimitive[];
   bounds: {
