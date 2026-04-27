@@ -634,7 +634,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       y: centerWorld.y - height / 2,
       width,
       height,
-      imageUrl: item.imageUrl,
+      imageUrl: item.catalogImageUrl,
       article: item.article,
       brand: item.brand,
       series: item.series,
