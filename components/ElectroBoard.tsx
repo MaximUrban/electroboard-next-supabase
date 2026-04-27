@@ -773,7 +773,19 @@ function placeImportedCadAsset(cadAsset: CadAsset, displayName: string) {
     if (isDwg) {
       const result = await importDwgOnServer(file);
 
-      if (!result.ok) {
+      if (result.ok) {
+        placeImportedCadAsset(result.asset, file.name);
+        setStatus(`DWG импортирован: ${file.name}`);
+        return;
+      }
+
+      const shouldFallbackToMock =
+        result.status === 501 ||
+        result.error.toLowerCase().includes("конвертер") ||
+        result.error.toLowerCase().includes("not connected") ||
+        result.error.toLowerCase().includes("not configured");
+
+      if (!shouldFallbackToMock) {
         setStatus(`DWG не импортирован: ${result.error}`);
         alert(
           result.details
@@ -783,8 +795,9 @@ function placeImportedCadAsset(cadAsset: CadAsset, displayName: string) {
         return;
       }
 
-      placeImportedCadAsset(result.asset, file.name);
-      setStatus(`DWG импортирован: ${file.name}`);
+      const cadAsset = await createMockCadAssetFromImportedFile(file);
+      placeImportedCadAsset(cadAsset, file.name);
+      setStatus(`DWG импортирован во временном mock-режиме: ${file.name}`);
       return;
     }
 
