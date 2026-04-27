@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  filterDeviceLibrary,
+  filterStaticDeviceLibrary,
   libraryCountries,
   type LibraryCountry,
 } from "@/lib/device-library";
+import { getTurkeyLiveLibrary } from "@/lib/schneider-tr-parser";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -18,11 +19,17 @@ export async function GET(request: NextRequest) {
     ? countryParam
     : "FR";
 
-  const items = filterDeviceLibrary({
-    country,
-    search,
-    category,
-  });
+  let items;
+
+  if (country === "TR") {
+    const liveItems = await getTurkeyLiveLibrary({ search, category });
+    items =
+      liveItems.length > 0
+        ? liveItems
+        : filterStaticDeviceLibrary({ country, search, category });
+  } else {
+    items = filterStaticDeviceLibrary({ country, search, category });
+  }
 
   return NextResponse.json({
     country,
