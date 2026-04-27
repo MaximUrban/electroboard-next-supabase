@@ -1,12 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { importDwgViaExternalAdapter } from "@/lib/server-dwg-adapter";
 
-/**
- * Временный серверный route под будущий DWG-конвертер.
- *
- * Следующий этап:
- * - подключить реальный converter/worker/service
- * - вернуть normalized CadAsset
- */
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -22,9 +16,8 @@ export async function POST(request: NextRequest) {
     }
 
     const fileName = file.name || "drawing.dwg";
-    const lower = fileName.toLowerCase();
 
-    if (!lower.endsWith(".dwg")) {
+    if (!fileName.toLowerCase().endsWith(".dwg")) {
       return NextResponse.json(
         {
           error: "Ожидался файл .dwg",
@@ -33,14 +26,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json(
-      {
-        error: "Реальный серверный DWG-конвертер ещё не подключён",
-        details:
-          "DXF уже импортируется реально. Для DWG на следующем этапе нужно подключить backend adapter: DWG -> DXF/JSON.",
-      },
-      { status: 501 }
-    );
+    const result = await importDwgViaExternalAdapter(file);
+
+    if (!result.ok) {
+      return NextResponse.json(
+        {
+          error: result.error,
+          details: result.details,
+        },
+        { status: result.status || 500 }
+      );
+    }
+
+    return NextResponse.json({
+      asset: result.asset,
+    });
   } catch (error) {
     console.error("DWG import route error:", error);
 
