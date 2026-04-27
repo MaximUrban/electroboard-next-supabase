@@ -505,16 +505,6 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     };
   }
   
-  function worldToScreenPoint(
-  worldX: number,
-  worldY: number,
-  camera: CameraState
-) {
-  return {
-    x: camera.x + worldX * camera.zoom,
-    y: camera.y + worldY * camera.zoom,
-  };
-}
 
   function updateHoverAnchors(point: { x: number; y: number }, excludeLineId?: string) {
     const targetShape = [...shapes]
@@ -2872,7 +2862,16 @@ function getSelectionGeometry(
 
   return null;
 }
-
+function worldToScreenPoint(
+  worldX: number,
+  worldY: number,
+  camera: CameraState
+) {
+  return {
+    x: camera.x + worldX * camera.zoom,
+    y: camera.y + worldY * camera.zoom,
+  };
+}
 function rotatePoint(px: number, py: number, cx: number, cy: number, angleDegValue: number) {
   const angle = (angleDegValue * Math.PI) / 180;
   const cos = Math.cos(angle);
