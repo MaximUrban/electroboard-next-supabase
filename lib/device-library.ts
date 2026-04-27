@@ -18,6 +18,7 @@ export type DeviceLibrarySourceItem = {
   article: string;
   modules: number;
   catalogImageUrl: string;
+  productUrl?: string;
   titleByCountry: Partial<Record<LibraryCountry, string>>;
   categoryLabelByCountry: Partial<Record<LibraryCountry, string>>;
   countries: LibraryCountry[];
@@ -33,6 +34,7 @@ export type DeviceLibraryItem = {
   article: string;
   modules: number;
   catalogImageUrl: string;
+  productUrl?: string;
   name: string;
   country: LibraryCountry;
   drawingAssets: DrawingAsset[];
@@ -172,7 +174,7 @@ function buildItem(params: {
   };
 }
 
-const schneiderDevices: DeviceLibrarySourceItem[] = [
+const staticDevices: DeviceLibrarySourceItem[] = [
   buildItem({
     id: "sch-acti9-mcb-1p-c16-fr",
     series: "Acti9",
@@ -189,7 +191,6 @@ const schneiderDevices: DeviceLibrarySourceItem[] = [
       DE: "Автоматический выключатель",
     },
   }),
-
   buildItem({
     id: "sch-acti9-rcd-2p-40a-30ma",
     series: "Acti9",
@@ -208,7 +209,6 @@ const schneiderDevices: DeviceLibrarySourceItem[] = [
       US: "Residual current device",
     },
   }),
-
   buildItem({
     id: "sch-homeline-mcb-1p-20a-us",
     series: "Homeline",
@@ -223,340 +223,10 @@ const schneiderDevices: DeviceLibrarySourceItem[] = [
       US: "Circuit breaker",
     },
   }),
-
-  buildItem({
-    id: "tr-easy9-ez9f56120",
-    series: "Easy9",
-    category: "mcb",
-    article: "EZ9F56120",
-    modules: 1,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 otomatik sigorta 1P 20A C 6000A",
-    },
-    categoryLabelByCountry: {
-      TR: "Otomatik sigorta",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9-ez9f56125",
-    series: "Easy9",
-    category: "mcb",
-    article: "EZ9F56125",
-    modules: 1,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 otomatik sigorta 1P 25A C 6000A",
-    },
-    categoryLabelByCountry: {
-      TR: "Otomatik sigorta",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9-ez9f56132",
-    series: "Easy9",
-    category: "mcb",
-    article: "EZ9F56132",
-    modules: 1,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 otomatik sigorta 1P 32A C 6000A",
-    },
-    categoryLabelByCountry: {
-      TR: "Otomatik sigorta",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9-ez9f56150",
-    series: "Easy9",
-    category: "mcb",
-    article: "EZ9F56150",
-    modules: 1,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 otomatik sigorta 1P 50A C 6000A",
-    },
-    categoryLabelByCountry: {
-      TR: "Otomatik sigorta",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9-ez9f26116",
-    series: "Easy9",
-    category: "mcb",
-    article: "EZ9F26116",
-    modules: 1,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 otomatik sigorta 1P 16A B 6000A",
-    },
-    categoryLabelByCountry: {
-      TR: "Otomatik sigorta",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9-ez9f26125",
-    series: "Easy9",
-    category: "mcb",
-    article: "EZ9F26125",
-    modules: 1,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 otomatik sigorta 1P 25A B 6000A",
-    },
-    categoryLabelByCountry: {
-      TR: "Otomatik sigorta",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9-ez9f56206",
-    series: "Easy9",
-    category: "mcb",
-    article: "EZ9F56206",
-    modules: 2,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 otomatik sigorta 2P 6A C 6000A",
-    },
-    categoryLabelByCountry: {
-      TR: "Otomatik sigorta",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9-ez9f56210",
-    series: "Easy9",
-    category: "mcb",
-    article: "EZ9F56210",
-    modules: 2,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 otomatik sigorta 2P 10A C 6000A",
-    },
-    categoryLabelByCountry: {
-      TR: "Otomatik sigorta",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9-ez9f56216",
-    series: "Easy9",
-    category: "mcb",
-    article: "EZ9F56216",
-    modules: 2,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 otomatik sigorta 2P 16A C 6000A",
-    },
-    categoryLabelByCountry: {
-      TR: "Otomatik sigorta",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9-ez9f56225",
-    series: "Easy9",
-    category: "mcb",
-    article: "EZ9F56225",
-    modules: 2,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 otomatik sigorta 2P 25A C 6000A",
-    },
-    categoryLabelByCountry: {
-      TR: "Otomatik sigorta",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9-ez9f34306",
-    series: "Easy9",
-    category: "mcb",
-    article: "EZ9F34306",
-    modules: 3,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 otomatik sigorta 3P 6A C 4.5kA",
-    },
-    categoryLabelByCountry: {
-      TR: "Otomatik sigorta",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9-ez9f34316",
-    series: "Easy9",
-    category: "mcb",
-    article: "EZ9F34316",
-    modules: 3,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 otomatik sigorta 3P 16A C 4.5kA",
-    },
-    categoryLabelByCountry: {
-      TR: "Otomatik sigorta",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9-ez9f34416",
-    series: "Easy9",
-    category: "mcb",
-    article: "EZ9F34416",
-    modules: 4,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 otomatik sigorta 4P 16A C 4.5kA",
-    },
-    categoryLabelByCountry: {
-      TR: "Otomatik sigorta",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9pro-ez9f29116",
-    series: "Easy9 Pro",
-    category: "mcb",
-    article: "EZ9F29116",
-    modules: 1,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 Pro otomatik sigorta 1P 16A B 10kA",
-    },
-    categoryLabelByCountry: {
-      TR: "Otomatik sigorta",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9pro-ez9f29120",
-    series: "Easy9 Pro",
-    category: "mcb",
-    article: "EZ9F29120",
-    modules: 1,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 Pro otomatik sigorta 1P 20A B 10kA",
-    },
-    categoryLabelByCountry: {
-      TR: "Otomatik sigorta",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9pro-ez9f29125",
-    series: "Easy9 Pro",
-    category: "mcb",
-    article: "EZ9F29125",
-    modules: 1,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 Pro otomatik sigorta 1P 25A B 10kA",
-    },
-    categoryLabelByCountry: {
-      TR: "Otomatik sigorta",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9pro-ez9f57450",
-    series: "Easy9 Pro",
-    category: "mcb",
-    article: "EZ9F57450",
-    modules: 4,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 Pro otomatik sigorta 4P 50A C 6kA",
-    },
-    categoryLabelByCountry: {
-      TR: "Otomatik sigorta",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9-rcd-2p-40a-30ma",
-    series: "Easy9",
-    category: "rcd",
-    article: "EZ9R34240",
-    modules: 2,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 kaçak akım koruma şalteri 2P 40A 30mA",
-    },
-    categoryLabelByCountry: {
-      TR: "Kaçak akım koruma şalteri",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9-rcd-2p-63a-30ma",
-    series: "Easy9",
-    category: "rcd",
-    article: "EZ9R34263",
-    modules: 2,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 kaçak akım koruma şalteri 2P 63A 30mA",
-    },
-    categoryLabelByCountry: {
-      TR: "Kaçak akım koruma şalteri",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9-rcbo-1p-n-16a-30ma",
-    series: "Easy9",
-    category: "rcbo",
-    article: "EZ9D34616",
-    modules: 2,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 diferansiyel otomatik sigorta 1P+N 16A 30mA",
-    },
-    categoryLabelByCountry: {
-      TR: "Diferansiyel otomatik sigorta",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9-rcbo-1p-n-20a-30ma",
-    series: "Easy9",
-    category: "rcbo",
-    article: "EZ9D34620",
-    modules: 2,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 diferansiyel otomatik sigorta 1P+N 20A 30mA",
-    },
-    categoryLabelByCountry: {
-      TR: "Diferansiyel otomatik sigorta",
-    },
-  }),
-
-  buildItem({
-    id: "tr-easy9-rcbo-1p-n-25a-30ma",
-    series: "Easy9",
-    category: "rcbo",
-    article: "EZ9D34625",
-    modules: 2,
-    countries: ["TR"],
-    titleByCountry: {
-      TR: "Easy9 diferansiyel otomatik sigorta 1P+N 25A 30mA",
-    },
-    categoryLabelByCountry: {
-      TR: "Diferansiyel otomatik sigorta",
-    },
-  }),
 ];
 
-export function getDeviceLibrary(country: LibraryCountry): DeviceLibraryItem[] {
-  return schneiderDevices
+export function getStaticDeviceLibrary(country: LibraryCountry): DeviceLibraryItem[] {
+  return staticDevices
     .filter((item) => item.countries.includes(country))
     .map((item) => ({
       id: item.id,
@@ -570,6 +240,7 @@ export function getDeviceLibrary(country: LibraryCountry): DeviceLibraryItem[] {
       article: item.article,
       modules: item.modules,
       catalogImageUrl: item.catalogImageUrl,
+      productUrl: item.productUrl,
       name:
         item.titleByCountry[country] ||
         item.titleByCountry.FR ||
@@ -584,7 +255,7 @@ export function getDeviceLibrary(country: LibraryCountry): DeviceLibraryItem[] {
     });
 }
 
-export function filterDeviceLibrary(params: {
+export function filterStaticDeviceLibrary(params: {
   country: LibraryCountry;
   search?: string;
   category?: string;
@@ -592,7 +263,7 @@ export function filterDeviceLibrary(params: {
   const search = (params.search || "").trim().toLowerCase();
   const category = (params.category || "").trim().toLowerCase();
 
-  return getDeviceLibrary(params.country).filter((item) => {
+  return getStaticDeviceLibrary(params.country).filter((item) => {
     const matchesSearch =
       !search ||
       item.name.toLowerCase().includes(search) ||
