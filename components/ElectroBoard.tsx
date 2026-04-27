@@ -12,6 +12,7 @@ import type {
 import type { CadAsset, CadPrimitive } from "@/lib/cad-types";
 import { createMockCadAssetFromDrawing } from "@/lib/cad-mock";
 import { createMockCadAssetFromImportedFile } from "@/lib/cad-import-mock";
+import { importDwgOnServer } from "@/lib/dwg-import";
 
 type Tool =
   | "select"
@@ -712,62 +713,85 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     setSelectedId(shape.id);
     setShowLibrary(false);
   }
+function placeImportedCadAsset(cadAsset: CadAsset, displayName: string) {
+  const fitWidth = 900;
+  const scale = fitWidth / Math.max(1, cadAsset.bounds.width);
+  const width = cadAsset.bounds.width * scale;
+  const height = cadAsset.bounds.height * scale;
 
-  async function importDrawingFile(file: File) {
-  try {
-    setStatus(`Импорт: ${file.name}...`);
+  const centerWorld = screenToWorld(canvasSize.width / 2, canvasSize.height / 2);
 
-    const cadAsset = await createMockCadAssetFromImportedFile(file);
+  const layerState = Object.fromEntries(
+    cadAsset.layers.map((layer) => [layer.id, layer.visible])
+  );
 
-    const fitWidth = 900;
-    const scale = fitWidth / Math.max(1, cadAsset.bounds.width);
-    const width = cadAsset.bounds.width * scale;
-    const height = cadAsset.bounds.height * scale;
+  const shape: CadShape = {
+    id: crypto.randomUUID(),
+    type: "cad",
+    x: centerWorld.x - width / 2,
+    y: centerWorld.y - height / 2,
+    width,
+    height,
+    assetId: cadAsset.id,
+    article: displayName,
+    brand: "Imported",
+    series: "Drawing",
+    modules: 0,
+    categoryLabel: "Imported drawing",
+    country: "TR",
+    layerState,
+    label: displayName,
+    groupName: "",
+    cableType: "",
+    ...defaultStyle,
+    fillColor: "#1b2347",
+    opacity: 1,
+  };
 
-    const centerWorld = screenToWorld(canvasSize.width / 2, canvasSize.height / 2);
+  setCadAssets((prevAssets) => {
+    const nextAssets = [...prevAssets, cadAsset];
 
-    const layerState = Object.fromEntries(
-      cadAsset.layers.map((layer) => [layer.id, layer.visible])
-    );
-
-    const shape: CadShape = {
-      id: crypto.randomUUID(),
-      type: "cad",
-      x: centerWorld.x - width / 2,
-      y: centerWorld.y - height / 2,
-      width,
-      height,
-      assetId: cadAsset.id,
-      article: file.name,
-      brand: "Imported",
-      series: "Drawing",
-      modules: 0,
-      categoryLabel: "Imported drawing",
-      country: "TR",
-      layerState,
-      label: file.name,
-      groupName: "",
-      cableType: "",
-      ...defaultStyle,
-      fillColor: "#1b2347",
-      opacity: 1,
-    };
-
-    setCadAssets((prevAssets) => {
-      const nextAssets = [...prevAssets, cadAsset];
-
-      setShapes((prevShapes) => {
-        const nextShapes = [...prevShapes, shape];
-        window.setTimeout(() => commitHistory(nextShapes, nextAssets), 0);
-        return nextShapes;
-      });
-
-      return nextAssets;
+    setShapes((prevShapes) => {
+      const nextShapes = [...prevShapes, shape];
+      window.setTimeout(() => commitHistory(nextShapes, nextAssets), 0);
+      return nextShapes;
     });
 
-    setSelectedId(shape.id);
+    return nextAssets;
+  });
 
-    if (cadAsset.sourceFormat === "dxf") {
+  setSelectedId(shape.id);
+}
+  async function importDrawingFile(file: File) {
+  try {
+    const lower = file.name.toLowerCase();
+    const isDxf = lower.endsWith(".dxf");
+    const isDwg = lower.endsWith(".dwg");
+
+    setStatus(`Импорт: ${file.name}...`);
+
+    if (isDwg) {
+      const result = await importDwgOnServer(file);
+
+      if (!result.ok) {
+        setStatus(`DWG не импортирован: ${result.error}`);
+        alert(
+          result.details
+            ? `${result.error}\n\n${result.details}`
+            : result.error
+        );
+        return;
+      }
+
+      placeImportedCadAsset(result.asset, file.name);
+      setStatus(`DWG импортирован: ${file.name}`);
+      return;
+    }
+
+    const cadAsset = await createMockCadAssetFromImportedFile(file);
+    placeImportedCadAsset(cadAsset, file.name);
+
+    if (isDxf) {
       setStatus(`DXF импортирован: ${file.name}`);
     } else {
       setStatus(`Импортирован mock-чертёж: ${file.name}`);
@@ -775,6 +799,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   } catch (error) {
     console.error(error);
     setStatus(`Ошибка импорта: ${file.name}`);
+    alert("Ошибка импорта файла");
   }
 }
 
