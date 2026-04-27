@@ -125,6 +125,17 @@ type HistoryState = {
   projectName: string;
 };
 
+type CameraState = {
+  x: number;
+  y: number;
+  zoom: number;
+};
+
+type PanState = {
+  startScreen: { x: number; y: number };
+  startCamera: CameraState;
+};
+
 const defaultStyle: ShapeStyle = {
   strokeColor: "#7fa7ff",
   fillColor: "#4b70ff",
@@ -136,7 +147,6 @@ const defaultStyle: ShapeStyle = {
 
 export default function ElectroBoard({ projectId }: { projectId: string }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const altDragCreatedRef = useRef(false);
 
   const [projectName, setProjectName] = useState("Project");
   const [tool, setTool] = useState<Tool>("select");
@@ -151,6 +161,8 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   const [loaded, setLoaded] = useState(false);
   const [savingPulse, setSavingPulse] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const [camera, setCamera] = useState<CameraState>({ x: 0, y: 0, zoom: 1 });
+  const [panState, setPanState] = useState<PanState | null>(null);
   const [canvasSize] = useState({ width: 1400, height: 900 });
 
   const [history, setHistory] = useState<HistoryState[]>([]);
@@ -166,31 +178,26 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     [shapes, metersPerPixel]
   );
 
-  const snapshot = useMemo<HistoryState>(
-    () => ({
-      shapes,
-      calibrationPoints,
-      metersPerPixel,
-      projectName,
-    }),
-    [shapes, calibrationPoints, metersPerPixel, projectName]
-  );
-
   useEffect(() => {
     const saved = getProjectById(projectId);
 
     if (saved) {
+      const nextShapes = saved.data?.shapes || [];
+      const nextMPP = saved.data?.metersPerPixel || 0;
+      const nextCalibration = saved.data?.calibrationPoints || [];
+
       setProjectName(saved.name || "Project");
-      setShapes(saved.data?.shapes || []);
-      setMetersPerPixel(saved.data?.metersPerPixel || 0);
-      setCalibrationPoints(saved.data?.calibrationPoints || []);
+      setShapes(nextShapes);
+      setMetersPerPixel(nextMPP);
+      setCalibrationPoints(nextCalibration);
+
       const initial: HistoryState = {
-        shapes: saved.data?.shapes || [],
-        metersPerPixel: saved.data?.metersPerPixel || 0,
-        calibrationPoints: saved.data?.calibrationPoints || [],
+        shapes: nextShapes,
+        metersPerPixel: nextMPP,
+        calibrationPoints: nextCalibration,
         projectName: saved.name || "Project",
       };
-      setHistory([initial]);
+      setHistory([cloneDeep(initial)]);
       setHistoryIndex(0);
     } else {
       const initial: HistoryState = {
@@ -199,7 +206,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
         calibrationPoints: [],
         projectName: "Project",
       };
-      setHistory([initial]);
+      setHistory([cloneDeep(initial)]);
       setHistoryIndex(0);
     }
 
@@ -250,18 +257,14 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       }
 
       if (isTyping) return;
-      if (!selectedId) {
-        if (e.key === "Delete" || e.key === "Backspace") {
-          e.preventDefault();
-        }
-        return;
-      }
 
-      if (e.key === "Delete" || e.key === "Backspace") {
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
         e.preventDefault();
         deleteSelected();
         return;
       }
+
+      if (!selectedId) return;
 
       const step = e.shiftKey ? 10 : 1;
 
@@ -282,53 +285,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [loaded, selectedId, historyIndex, history]);
-
-  function pushHistory(next: HistoryState) {
-    setHistory((prev) => {
-      const trimmed = prev.slice(0, historyIndex + 1);
-      const last = trimmed[trimmed.length - 1];
-
-      if (last && JSON.stringify(last) === JSON.stringify(next)) {
-        return prev;
-      }
-
-      const updated = [...trimmed, cloneDeep(next)];
-      if (updated.length > 100) updated.shift();
-      const newIndex = updated.length - 1;
-      setHistoryIndex(newIndex);
-      return updated;
-    });
-  }
-
-  function undo() {
-    setHistoryIndex((prevIndex) => {
-      const nextIndex = Math.max(0, prevIndex - 1);
-      const state = history[nextIndex];
-      if (state) applyHistoryState(state);
-      return nextIndex;
-    });
-  }
-
-  function redo() {
-    setHistoryIndex((prevIndex) => {
-      const nextIndex = Math.min(history.length - 1, prevIndex + 1);
-      const state = history[nextIndex];
-      if (state) applyHistoryState(state);
-      return nextIndex;
-    });
-  }
-
-  function applyHistoryState(state: HistoryState) {
-    setShapes(cloneDeep(state.shapes));
-    setCalibrationPoints(cloneDeep(state.calibrationPoints));
-    setMetersPerPixel(state.metersPerPixel);
-    setProjectName(state.projectName);
-    setSelectedId(null);
-    setInteraction(null);
-    setDraftLine(null);
-    setStatus("История применена");
-  }
+  }, [loaded, selectedId, history, historyIndex]);
 
   function persistProject(showPulse = true) {
     const existing = getProjectById(projectId);
@@ -355,7 +312,29 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     }
   }
 
-  function commitHistory(nextShapes?: Shape[], nextCalibrationPoints?: CalibrationPoint[], nextMetersPerPixel?: number, nextProjectName?: string) {
+  function pushHistory(next: HistoryState) {
+    setHistory((prev) => {
+      const trimmed = prev.slice(0, historyIndex + 1);
+      const last = trimmed[trimmed.length - 1];
+
+      if (last && JSON.stringify(last) === JSON.stringify(next)) {
+        return prev;
+      }
+
+      const updated = [...trimmed, cloneDeep(next)];
+      const capped = updated.slice(-100);
+      const newIndex = capped.length - 1;
+      setHistoryIndex(newIndex);
+      return capped;
+    });
+  }
+
+  function commitHistory(
+    nextShapes?: Shape[],
+    nextCalibrationPoints?: CalibrationPoint[],
+    nextMetersPerPixel?: number,
+    nextProjectName?: string
+  ) {
     pushHistory({
       shapes: cloneDeep(nextShapes ?? shapes),
       calibrationPoints: cloneDeep(nextCalibrationPoints ?? calibrationPoints),
@@ -364,14 +343,57 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     });
   }
 
-  function getSvgPoint(clientX: number, clientY: number) {
+  function applyHistoryState(state: HistoryState) {
+    setShapes(cloneDeep(state.shapes));
+    setCalibrationPoints(cloneDeep(state.calibrationPoints));
+    setMetersPerPixel(state.metersPerPixel);
+    setProjectName(state.projectName);
+    setSelectedId(null);
+    setInteraction(null);
+    setDraftLine(null);
+    setStatus("История применена");
+  }
+
+  function undo() {
+    setHistoryIndex((prevIndex) => {
+      const nextIndex = Math.max(0, prevIndex - 1);
+      const state = history[nextIndex];
+      if (state) applyHistoryState(state);
+      return nextIndex;
+    });
+  }
+
+  function redo() {
+    setHistoryIndex((prevIndex) => {
+      const nextIndex = Math.min(history.length - 1, prevIndex + 1);
+      const state = history[nextIndex];
+      if (state) applyHistoryState(state);
+      return nextIndex;
+    });
+  }
+
+  function getScreenPoint(clientX: number, clientY: number) {
     const svg = svgRef.current;
     if (!svg) return { x: 0, y: 0 };
+
     const rect = svg.getBoundingClientRect();
+
     return {
       x: ((clientX - rect.left) / rect.width) * canvasSize.width,
       y: ((clientY - rect.top) / rect.height) * canvasSize.height,
     };
+  }
+
+  function screenToWorld(screenX: number, screenY: number) {
+    return {
+      x: (screenX - camera.x) / camera.zoom,
+      y: (screenY - camera.y) / camera.zoom,
+    };
+  }
+
+  function getWorldPoint(clientX: number, clientY: number) {
+    const screen = getScreenPoint(clientX, clientY);
+    return screenToWorld(screen.x, screen.y);
   }
 
   function setShapePatch(id: string, patch: Partial<Shape>) {
@@ -416,7 +438,6 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   function duplicateShapeWithoutAttachments(shape: Shape): Shape {
     const copy = cloneDeep(shape);
     copy.id = crypto.randomUUID();
-    copy.label = shape.label;
 
     if (copy.type === "line" || copy.type === "cable") {
       copy.startAttachment = undefined;
@@ -440,8 +461,8 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   }
 
   function handleCanvasMouseDown(e: React.MouseEvent<SVGSVGElement>) {
-    const point = getSvgPoint(e.clientX, e.clientY);
-    altDragCreatedRef.current = false;
+    const screenPoint = getScreenPoint(e.clientX, e.clientY);
+    const point = screenToWorld(screenPoint.x, screenPoint.y);
 
     if (tool === "calibrate") {
       const next = [...calibrationPoints, point].slice(-2);
@@ -477,6 +498,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       }
 
       const hit = [...shapes].reverse().find((shape) => isPointOnShape(point.x, point.y, shape));
+
       if (hit) {
         if (e.altKey) {
           const duplicated = duplicateShapeWithoutAttachments(hit);
@@ -492,7 +514,6 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
             startPointer: point,
             initialShape: cloneDeep(duplicated),
           });
-          altDragCreatedRef.current = true;
           return;
         }
 
@@ -508,6 +529,10 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
       setSelectedId(null);
       setInteraction(null);
+      setPanState({
+        startScreen: screenPoint,
+        startCamera: camera,
+      });
       return;
     }
 
@@ -621,7 +646,20 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   }
 
   function handleCanvasMouseMove(e: React.MouseEvent<SVGSVGElement>) {
-    const point = getSvgPoint(e.clientX, e.clientY);
+    const screenPoint = getScreenPoint(e.clientX, e.clientY);
+    const point = screenToWorld(screenPoint.x, screenPoint.y);
+
+    if (panState) {
+      const dx = screenPoint.x - panState.startScreen.x;
+      const dy = screenPoint.y - panState.startScreen.y;
+
+      setCamera({
+        ...panState.startCamera,
+        x: panState.startCamera.x + dx,
+        y: panState.startCamera.y + dy,
+      });
+      return;
+    }
 
     if (draftLine) {
       const snapped = orthogonalSnap({ x: draftLine.x, y: draftLine.y }, point, 2);
@@ -648,6 +686,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       });
       setDraftLine(null);
       setTool("select");
+      setPanState(null);
       return;
     }
 
@@ -698,6 +737,26 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     }
 
     setInteraction(null);
+    setPanState(null);
+  }
+
+  function handleWheel(e: React.WheelEvent<SVGSVGElement>) {
+    e.preventDefault();
+
+    const screen = getScreenPoint(e.clientX, e.clientY);
+    const worldBefore = screenToWorld(screen.x, screen.y);
+
+    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+    const nextZoom = Math.max(0.2, Math.min(4, camera.zoom * zoomFactor));
+
+    const nextCameraX = screen.x - worldBefore.x * nextZoom;
+    const nextCameraY = screen.y - worldBefore.y * nextZoom;
+
+    setCamera({
+      x: nextCameraX,
+      y: nextCameraY,
+      zoom: nextZoom,
+    });
   }
 
   function deleteSelected() {
@@ -716,6 +775,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     setDraftLine(null);
     setCalibrationPoints([]);
     setInteraction(null);
+    setPanState(null);
     setStatus("Холст очищен");
     window.setTimeout(() => commitHistory([], [], 0), 0);
   }
@@ -758,7 +818,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
           <div style={styles.statusBar}>
             <span>{status}</span>
             <span>
-              Масштаб: {metersPerPixel > 0 ? `${metersPerPixel.toFixed(5)} м / px` : "не задан"}
+              Масштаб: {metersPerPixel > 0 ? `${metersPerPixel.toFixed(5)} м / px` : "не задан"} | Zoom: {camera.zoom.toFixed(2)}x
             </span>
           </div>
 
@@ -766,11 +826,15 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
             <svg
               ref={svgRef}
               viewBox={`0 0 ${canvasSize.width} ${canvasSize.height}`}
-              style={styles.svg}
+              style={{
+                ...styles.svg,
+                cursor: panState ? "grabbing" : "grab",
+              }}
               onMouseDown={handleCanvasMouseDown}
               onMouseMove={handleCanvasMouseMove}
               onMouseUp={handleCanvasMouseUp}
               onMouseLeave={handleCanvasMouseUp}
+              onWheel={handleWheel}
             >
               <defs>
                 <pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse">
@@ -778,36 +842,38 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
                 </pattern>
               </defs>
 
-              <rect x="0" y="0" width={canvasSize.width} height={canvasSize.height} fill="url(#grid)" />
+              <g transform={`translate(${camera.x} ${camera.y}) scale(${camera.zoom})`}>
+                <rect x={-20000} y={-20000} width={40000} height={40000} fill="url(#grid)" />
 
-              {shapes.map((shape) => (
-                <React.Fragment key={shape.id}>
-                  {renderShape(shape, selectedId === shape.id)}
-                  {selectedId === shape.id ? renderSelectionOverlay(shape) : null}
-                </React.Fragment>
-              ))}
+                {shapes.map((shape) => (
+                  <React.Fragment key={shape.id}>
+                    {renderShape(shape, selectedId === shape.id)}
+                    {selectedId === shape.id ? renderSelectionOverlay(shape) : null}
+                  </React.Fragment>
+                ))}
 
-              {draftLine ? renderShape(draftLine, true) : null}
+                {draftLine ? renderShape(draftLine, true) : null}
 
-              {calibrationPoints.map((p, i) => (
-                <g key={`${p.x}-${p.y}-${i}`}>
-                  <circle cx={p.x} cy={p.y} r="6" fill="#00e7a7" />
-                  <text x={p.x + 8} y={p.y - 8} fill="#fff" fontSize="14">
-                    T{i + 1}
-                  </text>
-                </g>
-              ))}
+                {calibrationPoints.map((p, i) => (
+                  <g key={`${p.x}-${p.y}-${i}`}>
+                    <circle cx={p.x} cy={p.y} r="6" fill="#00e7a7" />
+                    <text x={p.x + 8} y={p.y - 8} fill="#fff" fontSize="14">
+                      T{i + 1}
+                    </text>
+                  </g>
+                ))}
 
-              {calibrationPoints.length === 2 ? (
-                <line
-                  x1={calibrationPoints[0].x}
-                  y1={calibrationPoints[0].y}
-                  x2={calibrationPoints[1].x}
-                  y2={calibrationPoints[1].y}
-                  stroke="#00e7a7"
-                  strokeWidth="3"
-                />
-              ) : null}
+                {calibrationPoints.length === 2 ? (
+                  <line
+                    x1={calibrationPoints[0].x}
+                    y1={calibrationPoints[0].y}
+                    x2={calibrationPoints[1].x}
+                    y2={calibrationPoints[1].y}
+                    stroke="#00e7a7"
+                    strokeWidth="3"
+                  />
+                ) : null}
+              </g>
             </svg>
           </div>
         </div>
@@ -959,6 +1025,8 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
                   <br />Стрелки — сдвиг 1px
                   <br />Shift + стрелки — сдвиг 10px
                   <br />Alt + drag — дублировать
+                  <br />Колесо — зум
+                  <br />Тянуть пустое место — двигать полотно
                 </div>
 
                 <button style={styles.deleteBtn} onClick={deleteSelected}>
@@ -1021,8 +1089,20 @@ function renderShape(shape: Shape, selected: boolean) {
     const cy = shape.y + shape.height / 2;
     return (
       <g transform={`rotate(${shape.rotation} ${cx} ${cy})`}>
-        <rect x={shape.x} y={shape.y} width={shape.width} height={shape.height} fill={fill} stroke={stroke} strokeWidth={sw} strokeDasharray={dash} rx="6" />
-        <text x={shape.x + 6} y={shape.y - 10} fill="#f2f6ff" fontSize="14">{shape.label}</text>
+        <rect
+          x={shape.x}
+          y={shape.y}
+          width={shape.width}
+          height={shape.height}
+          fill={fill}
+          stroke={stroke}
+          strokeWidth={sw}
+          strokeDasharray={dash}
+          rx="6"
+        />
+        <text x={shape.x + 6} y={shape.y - 10} fill="#f2f6ff" fontSize="14">
+          {shape.label}
+        </text>
       </g>
     );
   }
@@ -1030,8 +1110,18 @@ function renderShape(shape: Shape, selected: boolean) {
   if (shape.type === "circle") {
     return (
       <g>
-        <circle cx={shape.x} cy={shape.y} r={shape.radius} fill={fill} stroke={stroke} strokeWidth={sw} strokeDasharray={dash} />
-        <text x={shape.x + shape.radius + 6} y={shape.y - shape.radius - 10} fill="#f2f6ff" fontSize="14">{shape.label}</text>
+        <circle
+          cx={shape.x}
+          cy={shape.y}
+          r={shape.radius}
+          fill={fill}
+          stroke={stroke}
+          strokeWidth={sw}
+          strokeDasharray={dash}
+        />
+        <text x={shape.x + shape.radius + 6} y={shape.y - shape.radius - 10} fill="#f2f6ff" fontSize="14">
+          {shape.label}
+        </text>
       </g>
     );
   }
@@ -1073,7 +1163,9 @@ function renderShape(shape: Shape, selected: boolean) {
         />
         <circle cx={shape.x - 8} cy={shape.y} r="4" fill={stroke} />
         <circle cx={shape.x + 8} cy={shape.y} r="4" fill={stroke} />
-        <text x={shape.x + 28} y={shape.y + 4} fill="#f2f6ff" fontSize="14">{shape.label} {shape.groupName || ""}</text>
+        <text x={shape.x + 28} y={shape.y + 4} fill="#f2f6ff" fontSize="14">
+          {shape.label} {shape.groupName || ""}
+        </text>
       </g>
     );
   }
@@ -1092,8 +1184,18 @@ function renderShape(shape: Shape, selected: boolean) {
           strokeWidth={sw}
           strokeDasharray={dash}
         />
-        <line x1={shape.x - 10} y1={shape.y - 12} x2={shape.x + 10} y2={shape.y + 12} stroke={stroke} strokeWidth={Math.max(2, sw)} strokeLinecap="round" />
-        <text x={shape.x + 28} y={shape.y + 4} fill="#f2f6ff" fontSize="14">{shape.label} {shape.groupName || ""}</text>
+        <line
+          x1={shape.x - 10}
+          y1={shape.y - 12}
+          x2={shape.x + 10}
+          y2={shape.y + 12}
+          stroke={stroke}
+          strokeWidth={Math.max(2, sw)}
+          strokeLinecap="round"
+        />
+        <text x={shape.x + 28} y={shape.y + 4} fill="#f2f6ff" fontSize="14">
+          {shape.label} {shape.groupName || ""}
+        </text>
       </g>
     );
   }
@@ -1119,7 +1221,9 @@ function renderSelectionOverlay(shape: Shape) {
   if (shape.type === "circle") {
     return (
       <g>
-        {anchors.map((a) => <circle key={a.id} cx={a.x} cy={a.y} r="4" fill="#9ec1ff" stroke="#fff" strokeWidth="1.5" />)}
+        {anchors.map((a) => (
+          <circle key={a.id} cx={a.x} cy={a.y} r="4" fill="#9ec1ff" stroke="#fff" strokeWidth="1.5" />
+        ))}
         <circle cx={shape.x + shape.radius} cy={shape.y} r="8" fill="#fff" stroke="#3d63ff" strokeWidth="3" />
       </g>
     );
@@ -1129,7 +1233,9 @@ function renderSelectionOverlay(shape: Shape) {
     const geometry = getSelectionGeometry(shape);
     return (
       <g>
-        {anchors.map((a) => <circle key={a.id} cx={a.x} cy={a.y} r="4" fill="#9ec1ff" stroke="#fff" strokeWidth="1.5" />)}
+        {anchors.map((a) => (
+          <circle key={a.id} cx={a.x} cy={a.y} r="4" fill="#9ec1ff" stroke="#fff" strokeWidth="1.5" />
+        ))}
         <line
           x1={geometry.center.x}
           y1={geometry.center.y}
@@ -1156,7 +1262,13 @@ function transformShape(shape: Shape, interaction: InteractionState, point: { x:
   if (interaction.mode === "move") {
     if (shape.type === "line" || shape.type === "cable") {
       const s = initial as LineShape;
-      return { ...shape, x: s.x + dx, y: s.y + dy, x2: s.x2 + dx, y2: s.y2 + dy };
+      return {
+        ...shape,
+        x: s.x + dx,
+        y: s.y + dy,
+        x2: s.x2 + dx,
+        y2: s.y2 + dy,
+      };
     }
     if (shape.type === "circle") {
       const s = initial as CircleShape;
@@ -1563,7 +1675,6 @@ const styles: Record<string, React.CSSProperties> = {
     inset: 0,
     width: "100%",
     height: "100%",
-    cursor: "crosshair",
   },
   sidebar: {
     display: "grid",
