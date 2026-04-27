@@ -232,6 +232,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   const [libraryCountry, setLibraryCountry] = useState<LibraryCountry>("FR");
   const [hoverAnchorState, setHoverAnchorState] = useState<HoverAnchorState | null>(null);
   const [canvasSize] = useState({ width: 1400, height: 900 });
+  const [canvasCursor, setCanvasCursor] = useState<React.CSSProperties["cursor"]>("grab");
 
   const [history, setHistory] = useState<HistoryState[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -1088,6 +1089,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     const point = screenToWorld(screenPoint.x, screenPoint.y);
 
     if (panState) {
+      setCanvasCursor("grabbing");
       const dx = screenPoint.x - panState.startScreen.x;
       const dy = screenPoint.y - panState.startScreen.y;
 
@@ -1100,6 +1102,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     }
 
     if (draftLine) {
+      setCanvasCursor("crosshair");
       updateHoverAnchors(point, draftLine.id);
 
       const snappedOrtho = orthogonalSnap({ x: draftLine.x, y: draftLine.y }, point, 2);
@@ -1121,14 +1124,32 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     }
 
     if (!interaction) {
-      if (tool === "line" || tool === "cable") {
-        updateHoverAnchors(point);
-      } else {
-        clearHoverAnchors();
-      }
-      return;
+  if (selectedShape) {
+    const hoveredHandle = hitTestHandleScreen(screenPoint, selectedShape, camera);
+    if (hoveredHandle) {
+      setCanvasCursor(getCursorByHandle(hoveredHandle));
+    } else {
+      const hit = [...shapes].reverse().find((shape) =>
+        isPointOnShape(point.x, point.y, shape)
+      );
+      setCanvasCursor(hit ? "move" : "grab");
     }
+  } else {
+    const hit = [...shapes].reverse().find((shape) =>
+      isPointOnShape(point.x, point.y, shape)
+    );
+    setCanvasCursor(hit ? "move" : "grab");
+  }
 
+  if (tool === "line" || tool === "cable") {
+    updateHoverAnchors(point);
+  } else {
+    clearHoverAnchors();
+  }
+
+  return;
+}
+    setCanvasCursor(getCursorByHandle(interaction.mode));
     if (interaction.mode === "line-start" || interaction.mode === "line-end") {
       updateHoverAnchors(point, interaction.shapeId);
     } else {
@@ -1224,8 +1245,9 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     }
 
     setInteraction(null);
-    setPanState(null);
-    clearHoverAnchors();
+setPanState(null);
+clearHoverAnchors();
+setCanvasCursor("grab");
   }
 
   function handleWheel(e: React.WheelEvent<SVGSVGElement>) {
@@ -1367,16 +1389,21 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
               ref={svgRef}
               viewBox={`0 0 ${canvasSize.width} ${canvasSize.height}`}
               style={{
-                ...styles.svg,
-                cursor: panState ? "grabbing" : "grab",
-              }}
+  ...styles.svg,
+  cursor: panState
+    ? "grabbing"
+    : interaction
+      ? getCursorByHandle(interaction.mode)
+      : canvasCursor,
+}}
               onMouseDown={handleCanvasMouseDown}
               onMouseMove={handleCanvasMouseMove}
               onMouseUp={handleCanvasMouseUp}
               onMouseLeave={() => {
-                handleCanvasMouseUp();
-                clearHoverAnchors();
-              }}
+  handleCanvasMouseUp();
+  clearHoverAnchors();
+  setCanvasCursor("grab");
+}}
               onWheel={handleWheel}
             >
               <defs>
@@ -2805,11 +2832,11 @@ function hitTestHandleScreen(
   shape: Shape,
   camera: CameraState
 ): HandleType | null {
-  const cornerRadiusPx = 22;
-  const sideRadiusPx = 18;
-  const rotateRadiusPx = 20;
-  const lineEndRadiusPx = 18;
-  const lineMidRadiusPx = 20;
+  const cornerRadiusPx = 34;
+const sideRadiusPx = 28;
+const rotateRadiusPx = 24;
+const lineEndRadiusPx = 22;
+const lineMidRadiusPx = 24;
 
   const distToWorldPoint = (worldX: number, worldY: number) => {
     const p = projectWorldToScreen(worldX, worldY, camera);
@@ -3045,6 +3072,33 @@ function isSideResizeHandle(handle: HandleType) {
     handle === "resize-e" ||
     handle === "resize-w"
   );
+}
+function getCursorByHandle(handle: HandleType): React.CSSProperties["cursor"] {
+  switch (handle) {
+    case "move":
+      return "move";
+    case "resize-n":
+    case "resize-s":
+      return "ns-resize";
+    case "resize-e":
+    case "resize-w":
+      return "ew-resize";
+    case "resize-nw":
+    case "resize-se":
+      return "nwse-resize";
+    case "resize-ne":
+    case "resize-sw":
+      return "nesw-resize";
+    case "resize-circle":
+      return "ew-resize";
+    case "rotate":
+      return "crosshair";
+    case "line-start":
+    case "line-end":
+      return "move";
+    default:
+      return "grab";
+  }
 }
 
 function orthogonalSnap(from: { x: number; y: number }, to: { x: number; y: number }, tolerance = 2) {
