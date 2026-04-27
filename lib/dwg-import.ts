@@ -9,21 +9,11 @@ export type DwgImportError = {
   ok: false;
   error: string;
   details?: string;
+  status?: number;
 };
 
 export type DwgImportResult = DwgImportSuccess | DwgImportError;
 
-/**
- * Здесь будет реальный серверный адаптер DWG -> normalized CAD JSON.
- *
- * Варианты подключения позже:
- * 1) внешний сервис-конвертер
- * 2) локальный backend/worker
- * 3) DXF intermediary pipeline
- *
- * Сейчас функция специально возвращает понятную ошибку,
- * чтобы UI уже умел работать с реальным серверным потоком.
- */
 export async function importDwgOnServer(file: File): Promise<DwgImportResult> {
   const formData = new FormData();
   formData.append("file", file);
@@ -62,6 +52,7 @@ export async function importDwgOnServer(file: File): Promise<DwgImportResult> {
       ok: false,
       error: message,
       details,
+      status: response.status,
     };
   }
 
