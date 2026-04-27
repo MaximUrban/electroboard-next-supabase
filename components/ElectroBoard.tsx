@@ -1853,12 +1853,12 @@ const strokeWidth =
       </div>
 
       <DeviceLibraryModal
-        open={showLibrary}
-        country={libraryCountry}
-        onCountryChange={setLibraryCountry}
-        onClose={() => setShowLibrary(false)}
-        onAdd={(item, drawingAsset) => addCadFromLibrary(item, drawingAsset)}
-      />
+  open={showLibrary}
+  initialCountry={libraryCountry}
+  onCountryChange={setLibraryCountry}
+  onClose={() => setShowLibrary(false)}
+  onAdd={(item, drawingAsset) => addCadFromLibrary(item, drawingAsset)}
+/>
     </div>
   );
 }
