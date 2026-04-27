@@ -158,6 +158,8 @@ type InteractionState = {
   shapeId: string;
   startPointer: { x: number; y: number };
   initialShape: Shape;
+  resizeFromCenter?: boolean;
+  keepAspectRatio?: boolean;
 };
 
 type HistoryState = {
@@ -209,6 +211,9 @@ const WORLD_BOUNDS = {
   width: 40000,
   height: 40000,
 };
+
+const RESIZE_SENSITIVITY = 0.65;
+const ZOOM_STEP = 1.08;
 
 export default function ElectroBoard({ projectId }: { projectId: string }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -709,11 +714,11 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   }
 
   function zoomIn() {
-    zoomAtScreenPoint(canvasSize.width / 2, canvasSize.height / 2, 1.15);
+    zoomAtScreenPoint(canvasSize.width / 2, canvasSize.height / 2, ZOOM_STEP);
   }
 
   function zoomOut() {
-    zoomAtScreenPoint(canvasSize.width / 2, canvasSize.height / 2, 0.85);
+    zoomAtScreenPoint(canvasSize.width / 2, canvasSize.height / 2, 1 / ZOOM_STEP);
   }
 
   function resetView() {
@@ -857,6 +862,8 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       shapeId: shape.id,
       startPointer: point,
       initialShape: cloneDeep(shape),
+      resizeFromCenter: e.altKey,
+      keepAspectRatio: e.shiftKey,
     });
 
     if (mode === "line-start" || mode === "line-end") {
@@ -1157,7 +1164,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   if (selectedShape) {
     const hoveredHandle = hitTestHandleScreen(screenPoint, selectedShape, camera);
     if (hoveredHandle) {
-      setCanvasCursor(getCursorByHandle(hoveredHandle));
+      setCanvasCursor(getCursorByHandleForShape(hoveredHandle, selectedShape));
     } else {
       const hit = [...shapes].reverse().find((shape) =>
         isPointOnShape(point.x, point.y, shape)
@@ -1179,7 +1186,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
   return;
 }
-    setCanvasCursor(getCursorByHandle(interaction.mode));
+    setCanvasCursor(getCursorByHandleForShape(interaction.mode, shapes.find((item) => item.id === interaction.shapeId) || interaction.initialShape));
     if (interaction.mode === "line-start" || interaction.mode === "line-end") {
       updateHoverAnchors(point, interaction.shapeId);
     } else {
@@ -1312,7 +1319,7 @@ setCanvasCursor("grab");
   function handleWheel(e: React.WheelEvent<SVGSVGElement>) {
     e.preventDefault();
     const screen = getScreenPoint(e.clientX, e.clientY);
-    const factor = e.deltaY < 0 ? 1.1 : 0.9;
+    const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
     zoomAtScreenPoint(screen.x, screen.y, factor);
   }
 
@@ -2746,8 +2753,10 @@ function transformShape(
   point: { x: number; y: number },
   allShapes: Shape[]
 ): Shape {
-  const dx = point.x - interaction.startPointer.x;
-  const dy = point.y - interaction.startPointer.y;
+  const rawDx = point.x - interaction.startPointer.x;
+  const rawDy = point.y - interaction.startPointer.y;
+  const dx = rawDx * RESIZE_SENSITIVITY;
+  const dy = rawDy * RESIZE_SENSITIVITY;
   const initial = interaction.initialShape;
 
   if (interaction.mode === "move") {
@@ -2755,30 +2764,30 @@ function transformShape(
       const s = initial as LineShape;
       return {
         ...shape,
-        x: s.x + dx,
-        y: s.y + dy,
-        x2: s.x2 + dx,
-        y2: s.y2 + dy,
+        x: s.x + rawDx,
+        y: s.y + rawDy,
+        x2: s.x2 + rawDx,
+        y2: s.y2 + rawDy,
       };
     }
 
     if (shape.type === "circle") {
       const s = initial as CircleShape;
-      return { ...shape, x: s.x + dx, y: s.y + dy };
+      return { ...shape, x: s.x + rawDx, y: s.y + rawDy };
     }
 
     if (shape.type === "rectangle") {
       const s = initial as RectangleShape;
-      return { ...shape, x: s.x + dx, y: s.y + dy };
+      return { ...shape, x: s.x + rawDx, y: s.y + rawDy };
     }
 
     if (shape.type === "cad") {
       const s = initial as CadShape;
-      return { ...shape, x: s.x + dx, y: s.y + dy };
+      return { ...shape, x: s.x + rawDx, y: s.y + rawDy };
     }
 
     const s = initial as SocketShape | SwitchShape;
-    return { ...shape, x: s.x + dx, y: s.y + dy };
+    return { ...shape, x: s.x + rawDx, y: s.y + rawDy };
   }
 
   if (interaction.mode === "line-start" && (shape.type === "line" || shape.type === "cable")) {
@@ -2808,9 +2817,15 @@ function transformShape(
   }
 
   if (interaction.mode === "resize-circle" && shape.type === "circle") {
+    const initialCircle = initial as CircleShape;
+    const projectedDelta = rawDx;
+    const nextRadius = interaction.resizeFromCenter
+      ? Math.max(10, initialCircle.radius + projectedDelta * RESIZE_SENSITIVITY)
+      : Math.max(10, initialCircle.radius + projectedDelta * RESIZE_SENSITIVITY);
+
     return {
       ...shape,
-      radius: Math.max(10, distance(shape.x, shape.y, point.x, point.y)),
+      radius: nextRadius,
     };
   }
 
@@ -2822,6 +2837,8 @@ function transformShape(
 
   if ((isCornerResizeHandle(interaction.mode) || isSideResizeHandle(interaction.mode)) && isRectLike) {
     const s = initial as RectangleShape | SocketShape | SwitchShape | CadShape;
+    const keepAspectRatio = Boolean(interaction.keepAspectRatio);
+    const resizeFromCenter = Boolean(interaction.resizeFromCenter);
 
     let left: number;
     let top: number;
@@ -2840,57 +2857,137 @@ function transformShape(
       height = s.height;
     }
 
+    const centerX = left + width / 2;
+    const centerY = top + height / 2;
+    const ratio = width / Math.max(height, 1);
+
     let nextLeft = left;
     let nextTop = top;
     let nextWidth = width;
     let nextHeight = height;
 
-    if (isCornerResizeHandle(interaction.mode)) {
-      const ratio = width / Math.max(height, 1);
+    if (resizeFromCenter) {
+      if (isCornerResizeHandle(interaction.mode)) {
+        const cornerSignX =
+          interaction.mode === "resize-ne" || interaction.mode === "resize-se" ? 1 : -1;
+        const cornerSignY =
+          interaction.mode === "resize-sw" || interaction.mode === "resize-se" ? 1 : -1;
 
-      if (interaction.mode === "resize-se") {
-        const size = Math.max(width + dx, (height + dy) * ratio, 16);
-        nextWidth = size;
-        nextHeight = size / ratio;
+        let widthDelta = cornerSignX * dx * 2;
+        let heightDelta = cornerSignY * dy * 2;
+
+        if (keepAspectRatio) {
+          const widthFromHeight = heightDelta * ratio;
+          const heightFromWidth = widthDelta / Math.max(ratio, 0.0001);
+
+          if (Math.abs(widthDelta) >= Math.abs(widthFromHeight)) {
+            widthDelta = widthFromHeight;
+          } else {
+            heightDelta = heightFromWidth;
+          }
+        }
+
+        nextWidth = Math.max(16, width + widthDelta);
+        nextHeight = Math.max(16, keepAspectRatio ? nextWidth / ratio : height + heightDelta);
+        if (keepAspectRatio) {
+          nextWidth = Math.max(16, nextHeight * ratio);
+        }
       }
 
-      if (interaction.mode === "resize-sw") {
-        const size = Math.max(width - dx, (height + dy) * ratio, 16);
-        nextWidth = size;
-        nextHeight = size / ratio;
-        nextLeft = left + (width - nextWidth);
+      if (isSideResizeHandle(interaction.mode)) {
+        if (interaction.mode === "resize-e" || interaction.mode === "resize-w") {
+          const sign = interaction.mode === "resize-e" ? 1 : -1;
+          nextWidth = Math.max(16, width + sign * dx * 2);
+
+          if (keepAspectRatio) {
+            nextHeight = Math.max(16, nextWidth / ratio);
+          }
+        }
+
+        if (interaction.mode === "resize-n" || interaction.mode === "resize-s") {
+          const sign = interaction.mode === "resize-s" ? 1 : -1;
+          nextHeight = Math.max(16, height + sign * dy * 2);
+
+          if (keepAspectRatio) {
+            nextWidth = Math.max(16, nextHeight * ratio);
+          }
+        }
       }
 
-      if (interaction.mode === "resize-ne") {
-        const size = Math.max(width + dx, (height - dy) * ratio, 16);
-        nextWidth = size;
-        nextHeight = size / ratio;
-        nextTop = top + (height - nextHeight);
+      nextLeft = centerX - nextWidth / 2;
+      nextTop = centerY - nextHeight / 2;
+    } else {
+      if (isCornerResizeHandle(interaction.mode)) {
+        if (interaction.mode === "resize-se") {
+          nextWidth = Math.max(16, width + dx);
+          nextHeight = Math.max(16, height + dy);
+        }
+
+        if (interaction.mode === "resize-sw") {
+          nextWidth = Math.max(16, width - dx);
+          nextHeight = Math.max(16, height + dy);
+          nextLeft = left + (width - nextWidth);
+        }
+
+        if (interaction.mode === "resize-ne") {
+          nextWidth = Math.max(16, width + dx);
+          nextHeight = Math.max(16, height - dy);
+          nextTop = top + (height - nextHeight);
+        }
+
+        if (interaction.mode === "resize-nw") {
+          nextWidth = Math.max(16, width - dx);
+          nextHeight = Math.max(16, height - dy);
+          nextLeft = left + (width - nextWidth);
+          nextTop = top + (height - nextHeight);
+        }
+
+        if (keepAspectRatio) {
+          if (interaction.mode === "resize-se" || interaction.mode === "resize-nw") {
+            const size = Math.max(nextWidth, nextHeight * ratio, 16);
+            nextWidth = size;
+            nextHeight = size / ratio;
+          } else {
+            const size = Math.max(nextWidth, nextHeight * ratio, 16);
+            nextWidth = size;
+            nextHeight = size / ratio;
+          }
+
+          if (interaction.mode === "resize-sw" || interaction.mode === "resize-nw") {
+            nextLeft = left + (width - nextWidth);
+          }
+
+          if (interaction.mode === "resize-ne" || interaction.mode === "resize-nw") {
+            nextTop = top + (height - nextHeight);
+          }
+        }
       }
 
-      if (interaction.mode === "resize-nw") {
-        const size = Math.max(width - dx, (height - dy) * ratio, 16);
-        nextWidth = size;
-        nextHeight = size / ratio;
-        nextLeft = left + (width - nextWidth);
-        nextTop = top + (height - nextHeight);
-      }
-    }
+      if (isSideResizeHandle(interaction.mode)) {
+        if (interaction.mode === "resize-e") {
+          nextWidth = Math.max(16, width + dx);
+        }
+        if (interaction.mode === "resize-w") {
+          nextWidth = Math.max(16, width - dx);
+          nextLeft = left + (width - nextWidth);
+        }
+        if (interaction.mode === "resize-s") {
+          nextHeight = Math.max(16, height + dy);
+        }
+        if (interaction.mode === "resize-n") {
+          nextHeight = Math.max(16, height - dy);
+          nextTop = top + (height - nextHeight);
+        }
 
-    if (isSideResizeHandle(interaction.mode)) {
-      if (interaction.mode === "resize-e") {
-        nextWidth = Math.max(16, width + dx);
-      }
-      if (interaction.mode === "resize-w") {
-        nextWidth = Math.max(16, width - dx);
-        nextLeft = left + (width - nextWidth);
-      }
-      if (interaction.mode === "resize-s") {
-        nextHeight = Math.max(16, height + dy);
-      }
-      if (interaction.mode === "resize-n") {
-        nextHeight = Math.max(16, height - dy);
-        nextTop = top + (height - nextHeight);
+        if (keepAspectRatio) {
+          if (interaction.mode === "resize-e" || interaction.mode === "resize-w") {
+            nextHeight = Math.max(16, nextWidth / ratio);
+            nextTop = top + (height - nextHeight) / 2;
+          } else {
+            nextWidth = Math.max(16, nextHeight * ratio);
+            nextLeft = left + (width - nextWidth) / 2;
+          }
+        }
       }
     }
 
@@ -3352,15 +3449,15 @@ function renderSelectionOverlayScreen(
           />
         </g>
 
-        {renderSquareHandle(corners.nw.x, corners.nw.y, cornerSize, "resize-nw", "nwse-resize", "corner")}
-        {renderSquareHandle(corners.ne.x, corners.ne.y, cornerSize, "resize-ne", "nesw-resize", "corner")}
-        {renderSquareHandle(corners.se.x, corners.se.y, cornerSize, "resize-se", "nwse-resize", "corner")}
-        {renderSquareHandle(corners.sw.x, corners.sw.y, cornerSize, "resize-sw", "nesw-resize", "corner")}
+        {renderSquareHandle(corners.nw.x, corners.nw.y, cornerSize, "resize-nw", getCursorByHandleForShape("resize-nw", shape), "corner")}
+        {renderSquareHandle(corners.ne.x, corners.ne.y, cornerSize, "resize-ne", getCursorByHandleForShape("resize-ne", shape), "corner")}
+        {renderSquareHandle(corners.se.x, corners.se.y, cornerSize, "resize-se", getCursorByHandleForShape("resize-se", shape), "corner")}
+        {renderSquareHandle(corners.sw.x, corners.sw.y, cornerSize, "resize-sw", getCursorByHandleForShape("resize-sw", shape), "corner")}
 
-        {renderSquareHandle(sides.n.x, sides.n.y, sideSize, "resize-n", "ns-resize", "side")}
-        {renderSquareHandle(sides.e.x, sides.e.y, sideSize, "resize-e", "ew-resize", "side")}
-        {renderSquareHandle(sides.s.x, sides.s.y, sideSize, "resize-s", "ns-resize", "side")}
-        {renderSquareHandle(sides.w.x, sides.w.y, sideSize, "resize-w", "ew-resize", "side")}
+        {renderSquareHandle(sides.n.x, sides.n.y, sideSize, "resize-n", getCursorByHandleForShape("resize-n", shape), "side")}
+        {renderSquareHandle(sides.e.x, sides.e.y, sideSize, "resize-e", getCursorByHandleForShape("resize-e", shape), "side")}
+        {renderSquareHandle(sides.s.x, sides.s.y, sideSize, "resize-s", getCursorByHandleForShape("resize-s", shape), "side")}
+        {renderSquareHandle(sides.w.x, sides.w.y, sideSize, "resize-w", getCursorByHandleForShape("resize-w", shape), "side")}
 
         {renderSquareHandle(rotateHandle.x, rotateHandle.y, rotateSize, "rotate", "crosshair", "rotate")}
       </g>
@@ -3490,6 +3587,55 @@ function getCursorByHandle(handle: HandleType): React.CSSProperties["cursor"] {
       return "move";
     default:
       return "grab";
+  }
+}
+
+function getCursorByHandleForShape(
+  handle: HandleType,
+  shape: Shape | null
+): React.CSSProperties["cursor"] {
+  if (!shape) return getCursorByHandle(handle);
+
+  if (
+    shape.type !== "rectangle" &&
+    shape.type !== "cad" &&
+    shape.type !== "socket" &&
+    shape.type !== "switch"
+  ) {
+    return getCursorByHandle(handle);
+  }
+
+  const rotation = ((shape.rotation % 360) + 360) % 360;
+  const cursorByQuarterTurn = (baseAngle: number) => {
+    const normalized = ((baseAngle + rotation) % 180 + 180) % 180;
+    const bucket = Math.round(normalized / 45) % 4;
+    switch (bucket) {
+      case 0:
+        return "ew-resize";
+      case 1:
+        return "nwse-resize";
+      case 2:
+        return "ns-resize";
+      default:
+        return "nesw-resize";
+    }
+  };
+
+  switch (handle) {
+    case "resize-e":
+    case "resize-w":
+      return cursorByQuarterTurn(0);
+    case "resize-n":
+    case "resize-s":
+      return cursorByQuarterTurn(90);
+    case "resize-ne":
+    case "resize-sw":
+      return cursorByQuarterTurn(45);
+    case "resize-nw":
+    case "resize-se":
+      return cursorByQuarterTurn(135);
+    default:
+      return getCursorByHandle(handle);
   }
 }
 
