@@ -5,6 +5,7 @@ import {
   libraryCountries,
   fullCategoryLabel,
   type DeviceLibraryItem,
+  type DrawingAsset,
   type LibraryCountry,
 } from "@/lib/device-library";
 
@@ -19,7 +20,7 @@ export default function DeviceLibraryModal({
   initialCountry: LibraryCountry;
   onClose: () => void;
   onCountryChange: (country: LibraryCountry) => void;
-  onAdd: (item: DeviceLibraryItem) => void;
+  onAdd: (item: DeviceLibraryItem, drawingAsset: DrawingAsset) => void;
 }) {
   const [country, setCountry] = useState<LibraryCountry>(initialCountry);
   const [search, setSearch] = useState("");
@@ -152,20 +153,21 @@ export default function DeviceLibraryModal({
                     Артикул: {item.article} · {item.modules} мод.
                   </div>
 
-                  <div style={styles.assetsTitle}>Доступные 2D-источники</div>
+                  <div style={styles.assetsTitle}>Добавить из 2D-источника</div>
 
-                  <div style={styles.variants}>
+                  <div style={styles.assetsWrap}>
                     {item.drawingAssets.map((asset) => (
-                      <span key={asset.id} style={styles.variantChip}>
+                      <button
+                        key={asset.id}
+                        style={styles.assetBtn}
+                        onClick={() => onAdd(item, asset)}
+                        title={asset.sourceUrl}
+                      >
                         {asset.label}
-                      </span>
+                      </button>
                     ))}
                   </div>
                 </div>
-
-                <button style={styles.addBtn} onClick={() => onAdd(item)}>
-                  Выбрать
-                </button>
               </div>
             ))
           )}
@@ -253,9 +255,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   card: {
     display: "grid",
-    gridTemplateColumns: "90px 1fr auto",
+    gridTemplateColumns: "90px 1fr",
     gap: 12,
-    alignItems: "center",
+    alignItems: "start",
     background: "#0c1330",
     border: "1px solid #26305b",
     borderRadius: 12,
@@ -296,27 +298,18 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 6,
     fontWeight: 600,
   },
-  variants: {
+  assetsWrap: {
     display: "flex",
-    gap: 6,
+    gap: 8,
     flexWrap: "wrap",
-    marginTop: 4,
   },
-  variantChip: {
-    fontSize: 12,
-    color: "#e8efff",
-    background: "#18244f",
-    border: "1px solid #33407a",
-    borderRadius: 999,
-    padding: "4px 8px",
-  },
-  addBtn: {
+  assetBtn: {
     background: "#2948c7",
     color: "#fff",
     border: "1px solid #7aa0ff",
     borderRadius: 10,
-    padding: "10px 14px",
+    padding: "8px 12px",
     cursor: "pointer",
-    whiteSpace: "nowrap",
+    fontSize: 12,
   },
 };
