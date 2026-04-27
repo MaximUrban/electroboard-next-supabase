@@ -163,7 +163,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   const [draftLine, setDraftLine] = useState<LineShape | null>(null);
   const [interaction, setInteraction] = useState<InteractionState | null>(null);
   const [calibrationPoints, setCalibrationPoints] = useState<CalibrationPoint[]>([]);
-  const [metersPerPixel, setMetersPerPixel] = useState<number>(0);
+  const [metersPerPixel, setMetersPerPixel] = useState(0);
   const [calibrationDistanceMeters, setCalibrationDistanceMeters] = useState("1");
   const [status, setStatus] = useState("Готово");
   const [loaded, setLoaded] = useState(false);
@@ -192,32 +192,33 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     const saved = getProjectById(projectId);
 
     if (saved) {
-      const nextShapes = saved.data?.shapes || [];
-      const nextMPP = saved.data?.metersPerPixel || 0;
-      const nextCalibration = saved.data?.calibrationPoints || [];
+      const nextShapes = (saved.data?.shapes || []) as Shape[];
+      const nextMetersPerPixel = Number(saved.data?.metersPerPixel || 0);
+      const nextCalibration = (saved.data?.calibrationPoints || []) as CalibrationPoint[];
 
       setProjectName(saved.name || "Project");
       setShapes(nextShapes);
-      setMetersPerPixel(nextMPP);
+      setMetersPerPixel(nextMetersPerPixel);
       setCalibrationPoints(nextCalibration);
       setLastSavedAt(saved.updatedAt || null);
 
       const initial: HistoryState = {
-        shapes: nextShapes,
-        metersPerPixel: nextMPP,
-        calibrationPoints: nextCalibration,
+        shapes: cloneDeep(nextShapes),
+        calibrationPoints: cloneDeep(nextCalibration),
+        metersPerPixel: nextMetersPerPixel,
         projectName: saved.name || "Project",
       };
-      setHistory([cloneDeep(initial)]);
+
+      setHistory([initial]);
       setHistoryIndex(0);
     } else {
       const initial: HistoryState = {
         shapes: [],
-        metersPerPixel: 0,
         calibrationPoints: [],
+        metersPerPixel: 0,
         projectName: "Project",
       };
-      setHistory([cloneDeep(initial)]);
+      setHistory([initial]);
       setHistoryIndex(0);
     }
 
@@ -237,8 +238,8 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       persistProjectData(
         {
           shapes,
-          metersPerPixel,
           calibrationPoints,
+          metersPerPixel,
           projectName,
         },
         false
@@ -247,15 +248,16 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [loaded, shapes, metersPerPixel, calibrationPoints, projectName, projectId]);
+  }, [loaded, projectId, shapes, calibrationPoints, metersPerPixel, projectName]);
 
   useEffect(() => {
     if (!loaded) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
       const isTyping =
-        tag === "input" || tag === "textarea" || (e.target as HTMLElement | null)?.isContentEditable;
+        tag === "input" || tag === "textarea" || target?.isContentEditable;
 
       const mod = e.ctrlKey || e.metaKey;
 
@@ -329,17 +331,20 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     if (animate) {
       window.setTimeout(() => {
         setStatus("Готово");
-      }, 700);
+      }, 600);
     }
   }
 
   function persistCurrent() {
-    persistProjectData({
-      shapes,
-      metersPerPixel,
-      calibrationPoints,
-      projectName,
-    });
+    persistProjectData(
+      {
+        shapes,
+        calibrationPoints,
+        metersPerPixel,
+        projectName,
+      },
+      true
+    );
   }
 
   function pushHistory(next: HistoryState) {
@@ -426,7 +431,9 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
   function setShapePatch(id: string, patch: Partial<Shape>) {
     setShapes((prev) => {
-      const next = applyAttachments(prev.map((s) => (s.id === id ? ({ ...s, ...patch } as Shape) : s)));
+      const next = applyAttachments(
+        prev.map((s) => (s.id === id ? ({ ...s, ...patch } as Shape) : s))
+      );
       window.setTimeout(() => commitHistory(next), 0);
       return next;
     });
@@ -546,10 +553,10 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
         const px = distance(next[0].x, next[0].y, next[1].x, next[1].y);
         const meters = Number(calibrationDistanceMeters);
         if (px > 0 && meters > 0) {
-          const nextMeters = meters / px;
-          setMetersPerPixel(nextMeters);
+          const nextMetersPerPixel = meters / px;
+          setMetersPerPixel(nextMetersPerPixel);
           setStatus(`Масштаб задан: ${meters.toFixed(2)} м на ${px.toFixed(0)} px`);
-          window.setTimeout(() => commitHistory(shapes, next, nextMeters), 0);
+          window.setTimeout(() => commitHistory(shapes, next, nextMetersPerPixel), 0);
         }
       } else {
         window.setTimeout(() => commitHistory(shapes, next), 0);
@@ -610,8 +617,10 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       return;
     }
 
-      const shape: Shape = {
+    if (tool === "rectangle") {
+      const shape: RectangleShape = {
         id: crypto.randomUUID(),
+        type: "rectangle",
         x: point.x,
         y: point.y,
         width: 140,
@@ -768,12 +777,12 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
           if (shape.id !== interaction.shapeId) return shape;
           if (shape.type !== "line" && shape.type !== "cable") return shape;
 
-          const point =
+          const endpoint =
             interaction.mode === "line-start"
               ? { x: shape.x, y: shape.y }
               : { x: shape.x2, y: shape.y2 };
 
-          const snap = findClosestAnchor(prev, point, 22, shape.id);
+          const snap = findClosestAnchor(prev, endpoint, 22, shape.id);
 
           if (!snap) {
             return interaction.mode === "line-start"
@@ -841,20 +850,20 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     window.setTimeout(() => commitHistory([], [], 0), 0);
   }
 
- const objectTypeOptions =
-  selectedShape == null
-    ? []
-    : selectedShape.type === "line" || selectedShape.type === "cable"
-      ? [
-          { value: "line", label: "Линия" },
-          { value: "cable", label: "Кабель" },
-        ]
-      : [
-          { value: "rectangle", label: "Прямоугольник" },
-          { value: "circle", label: "Окружность" },
-          { value: "socket", label: "Розетка" },
-          { value: "switch", label: "Выключатель" },
-        ];
+  const objectTypeOptions =
+    selectedShape == null
+      ? []
+      : selectedShape.type === "line" || selectedShape.type === "cable"
+        ? [
+            { value: "line", label: "Линия" },
+            { value: "cable", label: "Кабель" },
+          ]
+        : [
+            { value: "rectangle", label: "Прямоугольник" },
+            { value: "circle", label: "Окружность" },
+            { value: "socket", label: "Розетка" },
+            { value: "switch", label: "Выключатель" },
+          ];
 
   return (
     <div style={styles.page}>
@@ -869,21 +878,40 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
             onChange={(e) => {
               const value = e.target.value;
               setProjectName(value);
-              window.setTimeout(() => commitHistory(shapes, calibrationPoints, metersPerPixel, value), 0);
+              window.setTimeout(
+                () => commitHistory(shapes, calibrationPoints, metersPerPixel, value),
+                0
+              );
             }}
             style={styles.projectInput}
           />
         </div>
 
         <div style={styles.leftBlock}>
-          <button style={tool === "select" ? styles.btnActive : styles.btn} onClick={() => setTool("select")}>Выбор</button>
-          <button style={tool === "rectangle" ? styles.btnActive : styles.btn} onClick={() => setTool("rectangle")}>Прямоугольник</button>
-          <button style={tool === "circle" ? styles.btnActive : styles.btn} onClick={() => setTool("circle")}>Окружность</button>
-          <button style={tool === "line" ? styles.btnActive : styles.btn} onClick={() => setTool("line")}>Линия</button>
-          <button style={tool === "cable" ? styles.btnActive : styles.btn} onClick={() => setTool("cable")}>Кабель</button>
-          <button style={tool === "socket" ? styles.btnActive : styles.btn} onClick={() => setTool("socket")}>Розетка</button>
-          <button style={tool === "switch" ? styles.btnActive : styles.btn} onClick={() => setTool("switch")}>Выключатель</button>
-          <button style={tool === "calibrate" ? styles.btnActive : styles.btn} onClick={() => setTool("calibrate")}>Масштаб</button>
+          <button style={tool === "select" ? styles.btnActive : styles.btn} onClick={() => setTool("select")}>
+            Выбор
+          </button>
+          <button style={tool === "rectangle" ? styles.btnActive : styles.btn} onClick={() => setTool("rectangle")}>
+            Прямоугольник
+          </button>
+          <button style={tool === "circle" ? styles.btnActive : styles.btn} onClick={() => setTool("circle")}>
+            Окружность
+          </button>
+          <button style={tool === "line" ? styles.btnActive : styles.btn} onClick={() => setTool("line")}>
+            Линия
+          </button>
+          <button style={tool === "cable" ? styles.btnActive : styles.btn} onClick={() => setTool("cable")}>
+            Кабель
+          </button>
+          <button style={tool === "socket" ? styles.btnActive : styles.btn} onClick={() => setTool("socket")}>
+            Розетка
+          </button>
+          <button style={tool === "switch" ? styles.btnActive : styles.btn} onClick={() => setTool("switch")}>
+            Выключатель
+          </button>
+          <button style={tool === "calibrate" ? styles.btnActive : styles.btn} onClick={() => setTool("calibrate")}>
+            Масштаб
+          </button>
 
           <button style={styles.iconBtn} onClick={undo} title="Undo">
             <IconUndo />
@@ -1072,7 +1100,12 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
                       onChange={(e) => setShapePatch(selectedShape.id, { strokeColor: e.target.value })}
                       style={styles.hiddenColorInput}
                     />
-                    <span style={{ ...styles.colorSwatch, background: safeColor(selectedShape.strokeColor) }} />
+                    <span
+                      style={{
+                        ...styles.colorSwatch,
+                        background: safeColor(selectedShape.strokeColor),
+                      }}
+                    />
                   </label>
 
                   {selectedShape.type !== "line" && selectedShape.type !== "cable" ? (
@@ -1083,7 +1116,12 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
                         onChange={(e) => setShapePatch(selectedShape.id, { fillColor: e.target.value })}
                         style={styles.hiddenColorInput}
                       />
-                      <span style={{ ...styles.colorSwatch, background: safeColor(selectedShape.fillColor) }} />
+                      <span
+                        style={{
+                          ...styles.colorSwatch,
+                          background: safeColor(selectedShape.fillColor),
+                        }}
+                      />
                     </label>
                   ) : (
                     <span style={styles.colorSwatchGhost} />
@@ -1166,8 +1204,13 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
             ) : (
               <div style={{ display: "grid", gap: 6 }}>
                 {estimate.map((row, idx) => (
-                  <div key={`${row.groupName}-${row.cableType}-${idx}`} style={styles.estimateRow}>
-                    <div><b>{row.groupName || "Без группы"}</b></div>
+                  <div
+                    key={`${row.groupName}-${row.cableType}-${idx}`}
+                    style={styles.estimateRow}
+                  >
+                    <div>
+                      <b>{row.groupName || "Без группы"}</b>
+                    </div>
                     <div>{row.cableType || "Без типа"}</div>
                     <div>{row.meters.toFixed(2)} м</div>
                   </div>
@@ -1249,8 +1292,8 @@ function MiniMap({
   const scaleX = miniWidth / WORLD_BOUNDS.width;
   const scaleY = miniHeight / WORLD_BOUNDS.height;
 
-  const viewLeft = (-camera.x) / camera.zoom;
-  const viewTop = (-camera.y) / camera.zoom;
+  const viewLeft = -camera.x / camera.zoom;
+  const viewTop = -camera.y / camera.zoom;
   const viewWidth = canvasSize.width / camera.zoom;
   const viewHeight = canvasSize.height / camera.zoom;
 
@@ -1316,7 +1359,7 @@ function MiniMap({
             );
           }
 
-          if (shape.type === "") {
+          if (shape.type === "rectangle") {
             const p = worldToMini(shape.x, shape.y);
             return (
               <rect
@@ -1591,10 +1634,13 @@ function convertShapeType(shape: Shape, nextType: Shape["type"]): Shape {
   const center = getShapeCenter(shape);
 
   if (nextType === "circle") {
-    const radius =
-      shape.type === "circle"
-        ? shape.radius
-        : Math.max(18, ("width" in shape ? shape.width : 36) / 2, ("height" in shape ? shape.height : 36) / 2);
+    let radius = 40;
+
+    if (shape.type === "circle") {
+      radius = shape.radius;
+    } else if (shape.type === "rectangle" || shape.type === "socket" || shape.type === "switch") {
+      radius = Math.max(18, shape.width / 2, shape.height / 2);
+    }
 
     return {
       id: shape.id,
@@ -1615,62 +1661,66 @@ function convertShapeType(shape: Shape, nextType: Shape["type"]): Shape {
   }
 
   if (nextType === "rectangle") {
-  let width = 80;
-  let height = 80;
+    let width = 80;
+    let height = 80;
 
-  if (shape.type === "circle") {
-    width = shape.radius * 2;
-    height = shape.radius * 2;
-  } else if (
-    shape.type === "rectangle" ||
-    shape.type === "socket" ||
-    shape.type === "switch"
-  ) {
-    width = shape.width;
-    height = shape.height;
+    if (shape.type === "circle") {
+      width = shape.radius * 2;
+      height = shape.radius * 2;
+    } else if (shape.type === "rectangle" || shape.type === "socket" || shape.type === "switch") {
+      width = shape.width;
+      height = shape.height;
+    }
+
+    return {
+      id: shape.id,
+      type: "rectangle",
+      x: center.x - width / 2,
+      y: center.y - height / 2,
+      width,
+      height,
+      label: shape.label,
+      groupName: shape.groupName,
+      cableType: shape.cableType,
+      strokeColor: shape.strokeColor,
+      fillColor: shape.fillColor,
+      strokeWidth: shape.strokeWidth,
+      strokeStyle: shape.strokeStyle,
+      opacity: shape.opacity,
+      rotation: shape.rotation,
+    };
   }
 
-  return {
-    id: shape.id,
-    type: "rectangle",
-    x: center.x - width / 2,
-    y: center.y - height / 2,
-    width,
-    height,
-    label: shape.label,
-    groupName: shape.groupName,
-    cableType: shape.cableType,
-    strokeColor: shape.strokeColor,
-    fillColor: shape.fillColor,
-    strokeWidth: shape.strokeWidth,
-    strokeStyle: shape.strokeStyle,
-    opacity: shape.opacity,
-    rotation: shape.rotation,
-  };
-}
-
   if (nextType === "socket" || nextType === "switch") {
-  const width = shape.type === "circle" ? Math.max(36, shape.radius * 2) : Math.max(24, shape.width);
-  const height = shape.type === "circle" ? Math.max(36, shape.radius * 2) : Math.max(24, shape.height);
+    let width = 36;
+    let height = 36;
 
-  return {
-    id: shape.id,
-    type: nextType,
-    x: center.x,
-    y: center.y,
-    width,
-    height,
-    label: nextType === "socket" ? "Розетка" : "Выключатель",
-    groupName: shape.groupName,
-    cableType: shape.cableType,
-    strokeColor: shape.strokeColor,
-    fillColor: nextType === "socket" ? shape.fillColor || "#00e7a7" : shape.fillColor || "#ff7300",
-    strokeWidth: shape.strokeWidth,
-    strokeStyle: shape.strokeStyle,
-    opacity: shape.opacity,
-    rotation: shape.rotation,
-  };
-}
+    if (shape.type === "circle") {
+      width = Math.max(36, shape.radius * 2);
+      height = Math.max(36, shape.radius * 2);
+    } else if (shape.type === "rectangle" || shape.type === "socket" || shape.type === "switch") {
+      width = Math.max(24, shape.width);
+      height = Math.max(24, shape.height);
+    }
+
+    return {
+      id: shape.id,
+      type: nextType,
+      x: center.x,
+      y: center.y,
+      width,
+      height,
+      label: nextType === "socket" ? "Розетка" : "Выключатель",
+      groupName: shape.groupName,
+      cableType: shape.cableType,
+      strokeColor: shape.strokeColor,
+      fillColor: nextType === "socket" ? shape.fillColor || "#00e7a7" : shape.fillColor || "#ff7300",
+      strokeWidth: shape.strokeWidth,
+      strokeStyle: shape.strokeStyle,
+      opacity: shape.opacity,
+      rotation: shape.rotation,
+    };
+  }
 
   return shape;
 }
@@ -1688,6 +1738,115 @@ function getShapeCenter(shape: Shape) {
   return { x: (shape.x + shape.x2) / 2, y: (shape.y + shape.y2) / 2 };
 }
 
+function transformShape(shape: Shape, interaction: InteractionState, point: { x: number; y: number }): Shape {
+  const dx = point.x - interaction.startPointer.x;
+  const dy = point.y - interaction.startPointer.y;
+  const initial = interaction.initialShape;
+
+  if (interaction.mode === "move") {
+    if (shape.type === "line" || shape.type === "cable") {
+      const s = initial as LineShape;
+      return {
+        ...shape,
+        x: s.x + dx,
+        y: s.y + dy,
+        x2: s.x2 + dx,
+        y2: s.y2 + dy,
+      };
+    }
+
+    if (shape.type === "circle") {
+      const s = initial as CircleShape;
+      return { ...shape, x: s.x + dx, y: s.y + dy };
+    }
+
+    if (shape.type === "rectangle") {
+      const s = initial as RectangleShape;
+      return { ...shape, x: s.x + dx, y: s.y + dy };
+    }
+
+    const s = initial as SocketShape | SwitchShape;
+    return { ...shape, x: s.x + dx, y: s.y + dy };
+  }
+
+  if (interaction.mode === "line-start" && (shape.type === "line" || shape.type === "cable")) {
+    const snapped = orthogonalSnap({ x: shape.x2, y: shape.y2 }, point, 2);
+    return { ...shape, x: snapped.x, y: snapped.y, startAttachment: undefined };
+  }
+
+  if (interaction.mode === "line-end" && (shape.type === "line" || shape.type === "cable")) {
+    const snapped = orthogonalSnap({ x: shape.x, y: shape.y }, point, 2);
+    return { ...shape, x2: snapped.x, y2: snapped.y, endAttachment: undefined };
+  }
+
+  if (interaction.mode === "resize-circle" && shape.type === "circle") {
+    return {
+      ...shape,
+      radius: Math.max(10, distance(shape.x, shape.y, point.x, point.y)),
+    };
+  }
+
+  if (interaction.mode === "resize-se") {
+    if (shape.type === "rectangle") {
+      const s = initial as RectangleShape;
+      return {
+        ...shape,
+        width: Math.max(20, s.width + dx),
+        height: Math.max(20, s.height + dy),
+      };
+    }
+
+    if (shape.type === "socket" || shape.type === "switch") {
+      const s = initial as SocketShape | SwitchShape;
+      return {
+        ...shape,
+        width: Math.max(16, s.width + dx),
+        height: Math.max(16, s.height + dy),
+      };
+    }
+  }
+
+  if (interaction.mode === "rotate") {
+    if (shape.type === "rectangle") {
+      const s = initial as RectangleShape;
+      const cx = s.x + s.width / 2;
+      const cy = s.y + s.height / 2;
+      return { ...shape, rotation: angleDeg(cx, cy, point.x, point.y) + 90 };
+    }
+
+    if (shape.type === "socket" || shape.type === "switch") {
+      const s = initial as SocketShape | SwitchShape;
+      return { ...shape, rotation: angleDeg(s.x, s.y, point.x, point.y) + 90 };
+    }
+  }
+
+  return shape;
+}
+
+function hitTestHandle(px: number, py: number, shape: Shape): HandleType | null {
+  if (shape.type === "line" || shape.type === "cable") {
+    const midX = (shape.x + shape.x2) / 2;
+    const midY = (shape.y + shape.y2) / 2;
+    if (distance(px, py, shape.x, shape.y) <= 12) return "line-start";
+    if (distance(px, py, shape.x2, shape.y2) <= 12) return "line-end";
+    if (distance(px, py, midX, midY) <= 12) return "move";
+    return null;
+  }
+
+  if (shape.type === "circle") {
+    if (distance(px, py, shape.x + shape.radius, shape.y) <= 12) return "resize-circle";
+    return null;
+  }
+
+  if (shape.type === "rectangle" || shape.type === "socket" || shape.type === "switch") {
+    const geometry = getSelectionGeometry(shape);
+    if (distance(px, py, geometry.rotateHandle.x, geometry.rotateHandle.y) <= 12) return "rotate";
+    if (distance(px, py, geometry.resizeHandle.x, geometry.resizeHandle.y) <= 12) return "resize-se";
+  }
+
+  return null;
+}
+
 function getSelectionGeometry(shape: RectangleShape | SocketShape | SwitchShape) {
   if (shape.type === "rectangle") {
     const cx = shape.x + shape.width / 2;
@@ -1697,7 +1856,11 @@ function getSelectionGeometry(shape: RectangleShape | SocketShape | SwitchShape)
     const topCenter = rotatePoint(shape.x + shape.width / 2, shape.y, cx, cy, shape.rotation);
     const rotateHandle = rotatePoint(topCenter.x, topCenter.y - 28, topCenter.x, topCenter.y, shape.rotation);
 
-    return { center: { x: cx, y: cy }, resizeHandle, rotateHandle };
+    return {
+      center: { x: cx, y: cy },
+      resizeHandle,
+      rotateHandle,
+    };
   }
 
   const cx = shape.x;
@@ -1706,7 +1869,11 @@ function getSelectionGeometry(shape: RectangleShape | SocketShape | SwitchShape)
   const topCenter = rotatePoint(shape.x, shape.y - shape.height / 2, cx, cy, shape.rotation);
   const rotateHandle = rotatePoint(topCenter.x, topCenter.y - 28, topCenter.x, topCenter.y, shape.rotation);
 
-  return { center: { x: cx, y: cy }, resizeHandle, rotateHandle };
+  return {
+    center: { x: cx, y: cy },
+    resizeHandle,
+    rotateHandle,
+  };
 }
 
 function rotatePoint(px: number, py: number, cx: number, cy: number, angleDegValue: number) {
@@ -1806,7 +1973,12 @@ function findClosestAnchor(
       const d = distance(point.x, point.y, anchor.x, anchor.y);
       if (d < bestDist && d <= maxDistance) {
         bestDist = d;
-        best = { shapeId: shape.id, anchorId: anchor.id, x: anchor.x, y: anchor.y };
+        best = {
+          shapeId: shape.id,
+          anchorId: anchor.id,
+          x: anchor.x,
+          y: anchor.y,
+        };
       }
     }
   }
@@ -1851,14 +2023,18 @@ function buildEstimate(shapes: Shape[], metersPerPixel: number): EstimateRow[] {
 
   for (const shape of shapes) {
     if (shape.type !== "cable") continue;
+
     const meters = lineLengthMeters(shape, metersPerPixel);
     const groupName = shape.groupName || "Без группы";
     const cableType = shape.cableType || "Без типа";
     const key = `${groupName}__${cableType}`;
     const existing = acc.get(key);
 
-    if (existing) existing.meters += meters;
-    else acc.set(key, { groupName, cableType, meters });
+    if (existing) {
+      existing.meters += meters;
+    } else {
+      acc.set(key, { groupName, cableType, meters });
+    }
   }
 
   return [...acc.values()].sort((a, b) => a.groupName.localeCompare(b.groupName));
@@ -1894,104 +2070,18 @@ function isPointOnShape(px: number, py: number, shape: Shape) {
   return false;
 }
 
-function transformShape(shape: Shape, interaction: InteractionState, point: { x: number; y: number }): Shape {
-  const dx = point.x - interaction.startPointer.x;
-  const dy = point.y - interaction.startPointer.y;
-  const initial = interaction.initialShape;
-
-  if (interaction.mode === "move") {
-    if (shape.type === "line" || shape.type === "cable") {
-      const s = initial as LineShape;
-      return {
-        ...shape,
-        x: s.x + dx,
-        y: s.y + dy,
-        x2: s.x2 + dx,
-        y2: s.y2 + dy,
-      };
-    }
-    if (shape.type === "circle") {
-      const s = initial as CircleShape;
-      return { ...shape, x: s.x + dx, y: s.y + dy };
-    }
-    if (shape.type === "rectangle") {
-      const s = initial as RectangleShape;
-      return { ...shape, x: s.x + dx, y: s.y + dy };
-    }
-    const s = initial as SocketShape | SwitchShape;
-    return { ...shape, x: s.x + dx, y: s.y + dy };
-  }
-
-  if (interaction.mode === "line-start" && (shape.type === "line" || shape.type === "cable")) {
-    const snapped = orthogonalSnap({ x: shape.x2, y: shape.y2 }, point, 2);
-    return { ...shape, x: snapped.x, y: snapped.y, startAttachment: undefined };
-  }
-
-  if (interaction.mode === "line-end" && (shape.type === "line" || shape.type === "cable")) {
-    const snapped = orthogonalSnap({ x: shape.x, y: shape.y }, point, 2);
-    return { ...shape, x2: snapped.x, y2: snapped.y, endAttachment: undefined };
-  }
-
-  if (interaction.mode === "resize-circle" && shape.type === "circle") {
-    return { ...shape, radius: Math.max(10, distance(shape.x, shape.y, point.x, point.y)) };
-  }
-
-  if (interaction.mode === "resize-se") {
-    if (shape.type === "rectangle") {
-      const s = initial as RectangleShape;
-      return { ...shape, width: Math.max(20, s.width + dx), height: Math.max(20, s.height + dy) };
-    }
-    if (shape.type === "socket" || shape.type === "switch") {
-      const s = initial as SocketShape | SwitchShape;
-      return { ...shape, width: Math.max(16, s.width + dx), height: Math.max(16, s.height + dy) };
-    }
-  }
-
-  if (interaction.mode === "rotate") {
-    if (shape.type === "rectangle") {
-      const s = initial as RectangleShape;
-      const cx = s.x + s.width / 2;
-      const cy = s.y + s.height / 2;
-      return { ...shape, rotation: angleDeg(cx, cy, point.x, point.y) + 90 };
-    }
-    if (shape.type === "socket" || shape.type === "switch") {
-      const s = initial as SocketShape | SwitchShape;
-      return { ...shape, rotation: angleDeg(s.x, s.y, point.x, point.y) + 90 };
-    }
-  }
-
-  return shape;
-}
-
-function hitTestHandle(px: number, py: number, shape: Shape): HandleType | null {
-  if (shape.type === "line" || shape.type === "cable") {
-    const midX = (shape.x + shape.x2) / 2;
-    const midY = (shape.y + shape.y2) / 2;
-    if (distance(px, py, shape.x, shape.y) <= 12) return "line-start";
-    if (distance(px, py, shape.x2, shape.y2) <= 12) return "line-end";
-    if (distance(px, py, midX, midY) <= 12) return "move";
-    return null;
-  }
-
-  if (shape.type === "circle") {
-    if (distance(px, py, shape.x + shape.radius, shape.y) <= 12) return "resize-circle";
-    return null;
-  }
-
-  if (shape.type === "rectangle" || shape.type === "socket" || shape.type === "switch") {
-    const geometry = getSelectionGeometry(shape);
-    if (distance(px, py, geometry.rotateHandle.x, geometry.rotateHandle.y) <= 12) return "rotate";
-    if (distance(px, py, geometry.resizeHandle.x, geometry.resizeHandle.y) <= 12) return "resize-se";
-  }
-
-  return null;
-}
-
 function distance(x1: number, y1: number, x2: number, y2: number) {
   return Math.hypot(x2 - x1, y2 - y1);
 }
 
-function distancePointToSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number) {
+function distancePointToSegment(
+  px: number,
+  py: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number
+) {
   const dx = x2 - x1;
   const dy = y2 - y1;
 
@@ -2304,8 +2394,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "block",
     width: 26,
     height: 2,
-    background:
-      "repeating-linear-gradient(to right, #dce7ff 0 6px, transparent 6px 10px)",
+    background: "repeating-linear-gradient(to right, #dce7ff 0 6px, transparent 6px 10px)",
     borderRadius: 999,
   },
   estimateRow: {
