@@ -49,7 +49,6 @@ type BaseShape = ShapeStyle & {
   label: string;
   groupName?: string;
   cableType?: string;
-  locked?: boolean;
 };
 
 type RectangleShape = BaseShape & {
@@ -161,28 +160,12 @@ type InteractionState = {
   initialShape: Shape;
 };
 
-type PendingMoveState = {
-  shapeId: string;
-  startPointer: { x: number; y: number };
-  startScreen: { x: number; y: number };
-  initialShape: Shape;
-};
-
-type PendingInteractionState = {
-  candidateMode: HandleType;
-  shapeId: string;
-  startPointer: { x: number; y: number };
-  startScreen: { x: number; y: number };
-  initialShape: Shape;
-};
-
 type HistoryState = {
   shapes: Shape[];
   cadAssets: CadAsset[];
   calibrationPoints: CalibrationPoint[];
   metersPerPixel: number;
   projectName: string;
-  camera: CameraState;
 };
 
 type CameraState = {
@@ -236,11 +219,8 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   const [shapes, setShapes] = useState<Shape[]>([]);
   const [cadAssets, setCadAssets] = useState<CadAsset[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [, setTransformModeId] = useState<string | null>(null);
-  const [, setPendingInteraction] = useState<PendingInteractionState | null>(null);
   const [draftLine, setDraftLine] = useState<LineShape | null>(null);
   const [interaction, setInteraction] = useState<InteractionState | null>(null);
-  const [pendingMove, setPendingMove] = useState<PendingMoveState | null>(null);
   const [calibrationPoints, setCalibrationPoints] = useState<CalibrationPoint[]>([]);
   const [metersPerPixel, setMetersPerPixel] = useState(0);
   const [calibrationDistanceMeters, setCalibrationDistanceMeters] = useState("1");
@@ -258,7 +238,6 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
 const [canvasSize] = useState({ width: 1400, height: 900 });
   const [canvasCursor, setCanvasCursor] = useState<React.CSSProperties["cursor"]>("grab");
-  const [cadStrokeScale, setCadStrokeScale] = useState(1.8);
 
   const [history, setHistory] = useState<HistoryState[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -281,22 +260,6 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
   useEffect(() => {
     const saved = getProjectById(projectId);
 
-    const savedCamera = saved?.data?.camera as CameraState | undefined;
-
-    const fallbackCamera: CameraState = {
-      x: canvasSize.width / 2,
-      y: canvasSize.height / 2,
-      zoom: 1,
-    };
-
-    const nextCamera =
-      savedCamera &&
-      typeof savedCamera.x === "number" &&
-      typeof savedCamera.y === "number" &&
-      typeof savedCamera.zoom === "number"
-        ? savedCamera
-        : fallbackCamera;
-
     if (saved) {
       const nextShapes = (saved.data?.shapes || []) as Shape[];
       const nextCadAssets = (saved.data?.cadAssets || []) as CadAsset[];
@@ -317,12 +280,10 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
         calibrationPoints: cloneDeep(nextCalibration),
         metersPerPixel: nextMetersPerPixel,
         projectName: saved.name || "Project",
-        camera: cloneDeep(nextCamera),
       };
 
       setHistory([initial]);
       setHistoryIndex(0);
-      setCamera(nextCamera);
     } else {
       const initial: HistoryState = {
         shapes: [],
@@ -330,20 +291,16 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
         calibrationPoints: [],
         metersPerPixel: 0,
         projectName: "Project",
-        camera: {
-          x: canvasSize.width / 2,
-          y: canvasSize.height / 2,
-          zoom: 1,
-        },
       };
       setHistory([initial]);
       setHistoryIndex(0);
-      setCamera({
-        x: canvasSize.width / 2,
-        y: canvasSize.height / 2,
-        zoom: 1,
-      });
     }
+
+    setCamera({
+      x: canvasSize.width / 2,
+      y: canvasSize.height / 2,
+      zoom: 1,
+    });
 
     setLoaded(true);
   }, [projectId, canvasSize.width, canvasSize.height]);
@@ -359,7 +316,6 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
           calibrationPoints,
           metersPerPixel,
           projectName,
-          camera,
         },
         false
       );
@@ -367,23 +323,7 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
 
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [loaded, projectId, shapes, cadAssets, calibrationPoints, metersPerPixel, projectName, libraryCountry, camera]);
-
-  useEffect(() => {
-    if (!loaded) return;
-
-    persistProjectData(
-      {
-        shapes,
-        cadAssets,
-        calibrationPoints,
-        metersPerPixel,
-        projectName,
-        camera,
-      },
-      false
-    );
-  }, [camera, loaded]);
+  }, [loaded, projectId, shapes, cadAssets, calibrationPoints, metersPerPixel, projectName, libraryCountry]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -457,7 +397,6 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
         cadAssets: data.cadAssets,
         metersPerPixel: data.metersPerPixel,
         calibrationPoints: data.calibrationPoints,
-        camera: data.camera,
         libraryCountry,
       },
     });
@@ -481,7 +420,6 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
         calibrationPoints,
         metersPerPixel,
         projectName,
-        camera,
       },
       true
     );
@@ -508,8 +446,7 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
     nextCadAssets?: CadAsset[],
     nextCalibrationPoints?: CalibrationPoint[],
     nextMetersPerPixel?: number,
-    nextProjectName?: string,
-    nextCamera?: CameraState
+    nextProjectName?: string
   ) {
     const nextState: HistoryState = {
       shapes: cloneDeep(nextShapes ?? shapes),
@@ -517,7 +454,6 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
       calibrationPoints: cloneDeep(nextCalibrationPoints ?? calibrationPoints),
       metersPerPixel: nextMetersPerPixel ?? metersPerPixel,
       projectName: nextProjectName ?? projectName,
-      camera: cloneDeep(nextCamera ?? camera),
     };
 
     pushHistory(nextState);
@@ -530,14 +466,10 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
     setCalibrationPoints(cloneDeep(state.calibrationPoints));
     setMetersPerPixel(state.metersPerPixel);
     setProjectName(state.projectName);
-    setCamera(cloneDeep(state.camera));
     setSelectedId(null);
-    setTransformModeId(null);
     setInteraction(null);
-    setPendingMove(null);
     setDraftLine(null);
     setHoverAnchorState(null);
-    setPendingInteraction(null);
     persistProjectData(state, false);
     setStatus("История применена");
   }
@@ -701,9 +633,6 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
 
   function nudgeSelected(dx: number, dy: number) {
     if (!selectedId) return;
-
-    const selected = shapes.find((shape) => shape.id === selectedId);
-    if (isShapeLocked(selected)) return;
 
     setShapes((prev) => {
       const next = applyAttachments(
@@ -910,6 +839,30 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
     setSelectedId(shape.id);
   }
 
+  function startHandleInteraction(
+    e: React.MouseEvent<SVGElement>,
+    shape: Shape,
+    mode: HandleType
+  ) {
+    e.stopPropagation();
+    e.preventDefault();
+
+    const screenPoint = getScreenPoint(e.clientX, e.clientY);
+    const point = screenToWorld(screenPoint.x, screenPoint.y);
+
+    setSelectedId(shape.id);
+    setInteraction({
+      mode,
+      shapeId: shape.id,
+      startPointer: point,
+      initialShape: cloneDeep(shape),
+    });
+
+    if (mode === "line-start" || mode === "line-end") {
+      updateHoverAnchors(point, shape.id);
+    }
+  }
+
   async function importDrawingFile(file: File) {
     try {
       const lower = file.name.toLowerCase();
@@ -986,17 +939,15 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
     }
 
     if (tool === "select") {
-      if (selectedShape && !isShapeLocked(selectedShape)) {
+      if (selectedShape) {
         const handle = hitTestHandleScreen(screenPoint, selectedShape, camera);
         if (handle) {
-          setPendingMove(null);
           setInteraction({
             mode: handle,
             shapeId: selectedShape.id,
             startPointer: point,
             initialShape: cloneDeep(selectedShape),
           });
-
           if (handle === "line-start" || handle === "line-end") {
             updateHoverAnchors(point, selectedShape.id);
           }
@@ -1004,12 +955,10 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
         }
       }
 
-      const hit = [...shapes]
-        .reverse()
-        .find((shape) => hitTestShapeScreen(screenPoint, shape, camera));
+      const hit = [...shapes].reverse().find((shape) => isPointOnShape(point.x, point.y, shape));
 
       if (hit) {
-        if (e.altKey && !isShapeLocked(hit)) {
+        if (e.altKey) {
           const duplicated = duplicateShapeWithoutAttachments(hit);
           setShapes((prev) => {
             const next = [...prev, duplicated];
@@ -1017,8 +966,6 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
             return next;
           });
           setSelectedId(duplicated.id);
-          setTransformModeId(null);
-          setPendingInteraction(null);
           setInteraction({
             mode: "move",
             shapeId: duplicated.id,
@@ -1029,14 +976,6 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
         }
 
         setSelectedId(hit.id);
-        setTransformModeId(null);
-        setPendingInteraction(null);
-
-        if (isShapeLocked(hit)) {
-          setInteraction(null);
-          return;
-        }
-
         setInteraction({
           mode: "move",
           shapeId: hit.id,
@@ -1047,8 +986,6 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
       }
 
       setSelectedId(null);
-      setTransformModeId(null);
-      setPendingInteraction(null);
       setInteraction(null);
       setPanState({
         startScreen: screenPoint,
@@ -1215,58 +1152,33 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
       return;
     }
 
-    if (!interaction && pendingMove) {
-      const dragDistance = distance(
-        screenPoint.x,
-        screenPoint.y,
-        pendingMove.startScreen.x,
-        pendingMove.startScreen.y
-      );
-
-      if (dragDistance < 4) {
-        setCanvasCursor("move");
-        return;
-      }
-
-      setInteraction({
-        mode: "move",
-        shapeId: pendingMove.shapeId,
-        startPointer: pendingMove.startPointer,
-        initialShape: cloneDeep(pendingMove.initialShape),
-      });
-      setPendingMove(null);
-      return;
-    }
-
     if (!interaction) {
-      if (selectedShape && !isShapeLocked(selectedShape)) {
-        const hoveredHandle = hitTestHandleScreen(screenPoint, selectedShape, camera);
-        if (hoveredHandle) {
-          setCanvasCursor(getCursorByHandle(hoveredHandle));
-        } else {
-          const hit = [...shapes]
-            .reverse()
-            .find((shape) => hitTestShapeScreen(screenPoint, shape, camera));
-          setCanvasCursor(hit && !isShapeLocked(hit) ? "move" : "grab");
-        }
-      } else {
-        const hit = [...shapes]
-          .reverse()
-          .find((shape) => hitTestShapeScreen(screenPoint, shape, camera));
-        setCanvasCursor(hit && !isShapeLocked(hit) ? "move" : "grab");
-      }
-
-      if (tool === "line" || tool === "cable") {
-        updateHoverAnchors(point);
-      } else {
-        clearHoverAnchors();
-      }
-
-      return;
+  if (selectedShape) {
+    const hoveredHandle = hitTestHandleScreen(screenPoint, selectedShape, camera);
+    if (hoveredHandle) {
+      setCanvasCursor(getCursorByHandle(hoveredHandle));
+    } else {
+      const hit = [...shapes].reverse().find((shape) =>
+        isPointOnShape(point.x, point.y, shape)
+      );
+      setCanvasCursor(hit ? "move" : "grab");
     }
+  } else {
+    const hit = [...shapes].reverse().find((shape) =>
+      isPointOnShape(point.x, point.y, shape)
+    );
+    setCanvasCursor(hit ? "move" : "grab");
+  }
 
+  if (tool === "line" || tool === "cable") {
+    updateHoverAnchors(point);
+  } else {
+    clearHoverAnchors();
+  }
+
+  return;
+}
     setCanvasCursor(getCursorByHandle(interaction.mode));
-
     if (interaction.mode === "line-start" || interaction.mode === "line-end") {
       updateHoverAnchors(point, interaction.shapeId);
     } else {
@@ -1274,39 +1186,39 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
     }
 
     setShapes((prev) => {
-      let updated = prev.map((shape) =>
-        shape.id === interaction.shapeId ? transformShape(shape, interaction, point, prev) : shape
+  let updated = prev.map((shape) =>
+    shape.id === interaction.shapeId ? transformShape(shape, interaction, point, prev) : shape
+  );
+
+  if (interaction.mode === "move") {
+    const movingShape = updated.find((shape) => shape.id === interaction.shapeId);
+
+    if (
+      movingShape &&
+      movingShape.type !== "line" &&
+      movingShape.type !== "cable"
+    ) {
+      const snapped = computeSnappedMove(
+        movingShape,
+        updated,
+        interaction.shapeId,
+        camera
       );
 
-      if (interaction.mode === "move") {
-        const movingShape = updated.find((shape) => shape.id === interaction.shapeId);
+      updated = updated.map((shape) =>
+        shape.id === interaction.shapeId ? snapped.shape : shape
+      );
 
-        if (
-          movingShape &&
-          movingShape.type !== "line" &&
-          movingShape.type !== "cable"
-        ) {
-          const snapped = computeSnappedMove(
-            movingShape,
-            updated,
-            interaction.shapeId,
-            camera
-          );
+      setAlignmentGuides(snapped.guides);
+    } else {
+      setAlignmentGuides([]);
+    }
+  } else {
+    setAlignmentGuides([]);
+  }
 
-          updated = updated.map((shape) =>
-            shape.id === interaction.shapeId ? snapped.shape : shape
-          );
-
-          setAlignmentGuides(snapped.guides);
-        } else {
-          setAlignmentGuides([]);
-        }
-      } else {
-        setAlignmentGuides([]);
-      }
-
-      return applyAttachments(updated);
-    });
+  return applyAttachments(updated);
+});
   }
 
   function handleCanvasMouseUp() {
@@ -1338,7 +1250,6 @@ const [canvasSize] = useState({ width: 1400, height: 900 });
       window.setTimeout(() => commitHistory(finalized), 0);
       setDraftLine(null);
       setTool("select");
-      setPendingInteraction(null);
       setPanState(null);
       clearHoverAnchors();
       return;
@@ -1404,18 +1315,6 @@ setCanvasCursor("grab");
     zoomAtScreenPoint(screen.x, screen.y, factor);
   }
 
-  function reorderSelectedShape(
-    direction: "backward" | "forward" | "to-back" | "to-front"
-  ) {
-    if (!selectedId) return;
-
-    setShapes((prev) => {
-      const next = moveShapeInStack(prev, selectedId, direction);
-      window.setTimeout(() => commitHistory(next), 0);
-      return next;
-    });
-  }
-
   function deleteSelected() {
     if (!selectedId) return;
     setShapes((prev) => {
@@ -1424,23 +1323,17 @@ setCanvasCursor("grab");
       return next;
     });
     setSelectedId(null);
-    setTransformModeId(null);
-    setPendingInteraction(null);
   }
 
   function clearAllConfirmed() {
     setShapes([]);
     setCadAssets([]);
     setSelectedId(null);
-    setTransformModeId(null);
     setDraftLine(null);
     setCalibrationPoints([]);
-    setPendingInteraction(null);
     setInteraction(null);
-    setPendingMove(null);
     setPanState(null);
     setHoverAnchorState(null);
-    setPendingInteraction(null);
     setShowClearConfirm(false);
     setStatus("Проект очищен");
     window.setTimeout(() => commitHistory([], [], [], 0), 0);
@@ -1640,9 +1533,7 @@ setCanvasCursor("grab");
                 ) : null}
               </g>
 {renderAlignmentGuidesScreen(alignmentGuides, camera, canvasSize)}
-{selectedShape && !isShapeLocked(selectedShape)
-  ? renderSelectionOverlayScreen(selectedShape, camera)
-  : null}
+{selectedShape ? renderSelectionOverlayScreen(selectedShape, camera, startHandleInteraction) : null}
             </svg>
 
             <div style={styles.zoomControls}>
@@ -1691,28 +1582,6 @@ setCanvasCursor("grab");
           </div>
 
           <div style={styles.card}>
-            <div style={styles.cardTitle}>CAD отображение</div>
-
-            <div style={styles.compactField}>
-              <label style={styles.label}>
-                Толщина CAD: {cadStrokeScale.toFixed(1)}x
-              </label>
-              <input
-                type="range"
-                min={1}
-                max={4}
-                step={0.1}
-                value={cadStrokeScale}
-                onChange={(e) => setCadStrokeScale(Number(e.target.value))}
-              />
-            </div>
-
-            <div style={styles.hintCompact}>
-              Меняет читаемость импортированного чертежа на экране.
-            </div>
-          </div>
-
-          <div style={styles.card}>
             <div style={styles.cardTitle}>Объект</div>
 
             {!selectedShape ? (
@@ -1741,72 +1610,6 @@ setCanvasCursor("grab");
                     onChange={(e) => setShapePatch(selectedShape.id, { label: e.target.value })}
                     style={styles.inputCompact}
                   />
-                </div>
-
-                <div style={styles.compactField}>
-                  <label style={styles.label}>Фиксация</label>
-                  <label
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      fontSize: 13,
-                      color: "#dce7ff",
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={Boolean(selectedShape.locked)}
-                      onChange={(e) =>
-                        setShapePatch(selectedShape.id, { locked: e.target.checked })
-                      }
-                    />
-                    Зафиксировать элемент
-                  </label>
-                </div>
-
-                <div style={styles.compactField}>
-                  <label style={styles.label}>Расположение</label>
-
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      gap: 6,
-                    }}
-                  >
-                    <button
-                      type="button"
-                      style={styles.btn}
-                      onClick={() => reorderSelectedShape("backward")}
-                    >
-                      Назад
-                    </button>
-
-                    <button
-                      type="button"
-                      style={styles.btn}
-                      onClick={() => reorderSelectedShape("forward")}
-                    >
-                      Вперед
-                    </button>
-
-                    <button
-                      type="button"
-                      style={styles.btn}
-                      onClick={() => reorderSelectedShape("to-back")}
-                    >
-                      На задний план
-                    </button>
-
-                    <button
-                      type="button"
-                      style={styles.btn}
-                      onClick={() => reorderSelectedShape("to-front")}
-                    >
-                      На передний план
-                    </button>
-                  </div>
                 </div>
 
                 {selectedShape.type === "cad" ? (
@@ -2261,12 +2064,7 @@ function Modal({
   );
 }
 
-function renderShape(
-  shape: Shape,
-  selected: boolean,
-  cadAssets: CadAsset[],
-  cadStrokeScale: number
-) {
+function renderShape(shape: Shape, selected: boolean, cadAssets: CadAsset[]) {
   const stroke = shape.strokeColor;
   const fill =
     shape.type === "line" || shape.type === "cable"
@@ -2293,7 +2091,7 @@ function renderShape(
           style={{ cursor: "move" }}
         />
         <text x={shape.x + 6} y={shape.y - 10} fill="#f2f6ff" fontSize="14">
-          {shape.label} {shape.locked ? "🔒" : ""}
+          {shape.label}
         </text>
       </g>
     );
@@ -2313,7 +2111,7 @@ function renderShape(
           style={{ cursor: "move" }}
         />
         <text x={shape.x + shape.radius + 6} y={shape.y - shape.radius - 10} fill="#f2f6ff" fontSize="14">
-          {shape.label} {shape.locked ? "🔒" : ""}
+          {shape.label}
         </text>
       </g>
     );
@@ -2335,7 +2133,7 @@ function renderShape(
           style={{ cursor: "move" }}
         />
         <text x={(shape.x + shape.x2) / 2 + 6} y={(shape.y + shape.y2) / 2 - 6} fill="#f2f6ff" fontSize="14">
-          {shape.label} {shape.groupName ? `(${shape.groupName})` : ""} {shape.locked ? "🔒" : ""}
+          {shape.label} {shape.groupName ? `(${shape.groupName})` : ""}
         </text>
       </g>
     );
@@ -2359,7 +2157,7 @@ function renderShape(
         <circle cx={shape.x - 8} cy={shape.y} r="4" fill={stroke} />
         <circle cx={shape.x + 8} cy={shape.y} r="4" fill={stroke} />
         <text x={shape.x + 28} y={shape.y + 4} fill="#f2f6ff" fontSize="14">
-          {shape.label} {shape.groupName || ""} {shape.locked ? "🔒" : ""}
+          {shape.label} {shape.groupName || ""}
         </text>
       </g>
     );
@@ -2390,7 +2188,7 @@ function renderShape(
           strokeLinecap="round"
         />
         <text x={shape.x + 28} y={shape.y + 4} fill="#f2f6ff" fontSize="14">
-          {shape.label} {shape.groupName || ""} {shape.locked ? "🔒" : ""}
+          {shape.label} {shape.groupName || ""}
         </text>
       </g>
     );
@@ -2457,14 +2255,13 @@ function renderShape(
             renderCadPrimitive(
               primitive,
               `${shape.id}-${index}`,
-              shape.layerState[primitive.layerId] ?? true,
-              cadStrokeScale
+              shape.layerState[primitive.layerId] ?? true
             )
           )}
         </g>
 
         <text x={shape.x} y={shape.y - 10} fill="#f2f6ff" fontSize="14">
-          {shape.label} {shape.locked ? "🔒" : ""}
+          {shape.label}
         </text>
       </g>
     );
@@ -2476,19 +2273,9 @@ function renderShape(
 function renderCadPrimitive(
   primitive: CadPrimitive,
   key: string,
-  visible: boolean,
-  cadStrokeScale: number
+  visible: boolean
 ) {
   if (!visible) return null;
-
-  const baseStrokeWidth =
-    primitive.type === "line" ||
-    primitive.type === "polyline" ||
-    primitive.type === "circle"
-      ? primitive.strokeWidth || 1
-      : 1;
-
-  const boostedStrokeWidth = Math.max(baseStrokeWidth * cadStrokeScale, 2.2);
 
   if (primitive.type === "line") {
     return (
@@ -2498,11 +2285,8 @@ function renderCadPrimitive(
         y1={primitive.y1}
         x2={primitive.x2}
         y2={primitive.y2}
-        stroke={primitive.stroke || "#e6eeff"}
-        strokeWidth={boostedStrokeWidth}
-        strokeLinecap="round"
-        vectorEffect="non-scaling-stroke"
-        shapeRendering="geometricPrecision"
+        stroke={primitive.stroke || "#dce7ff"}
+        strokeWidth={primitive.strokeWidth || 1}
       />
     );
   }
@@ -2514,12 +2298,9 @@ function renderCadPrimitive(
         key={key}
         points={points}
         fill={primitive.closed ? primitive.fill || "none" : "none"}
-        stroke={primitive.stroke || "#e6eeff"}
-        strokeWidth={boostedStrokeWidth}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        vectorEffect="non-scaling-stroke"
-        shapeRendering="geometricPrecision"
+        stroke={primitive.stroke || "#dce7ff"}
+        strokeWidth={primitive.strokeWidth || 1}
+        {...(primitive.closed ? { polygonRendering: "geometricPrecision" } : {})}
       />
     );
   }
@@ -2532,10 +2313,8 @@ function renderCadPrimitive(
         cy={primitive.cy}
         r={primitive.r}
         fill={primitive.fill || "none"}
-        stroke={primitive.stroke || "#e6eeff"}
-        strokeWidth={boostedStrokeWidth}
-        vectorEffect="non-scaling-stroke"
-        shapeRendering="geometricPrecision"
+        stroke={primitive.stroke || "#dce7ff"}
+        strokeWidth={primitive.strokeWidth || 1}
       />
     );
   }
@@ -2547,7 +2326,7 @@ function renderCadPrimitive(
         x={primitive.x}
         y={primitive.y}
         fill={primitive.fill || "#f2f6ff"}
-        fontSize={Math.max(primitive.size || 12, 13)}
+        fontSize={primitive.size || 12}
       >
         {primitive.text}
       </text>
@@ -2773,24 +2552,13 @@ function convertShapeType(shape: Shape, nextType: Shape["type"]): Shape {
 
 function getShapeBounds(shape: Shape) {
   if (shape.type === "rectangle" || shape.type === "cad") {
-    const geometry = getSelectionGeometry(shape);
-    const points = [
-      geometry.corners.nw,
-      geometry.corners.ne,
-      geometry.corners.se,
-      geometry.corners.sw,
-    ];
-
-    const xs = points.map((point) => point.x);
-    const ys = points.map((point) => point.y);
-
     return {
-      left: Math.min(...xs),
-      right: Math.max(...xs),
-      top: Math.min(...ys),
-      bottom: Math.max(...ys),
-      centerX: geometry.center.x,
-      centerY: geometry.center.y,
+      left: shape.x,
+      right: shape.x + shape.width,
+      top: shape.y,
+      bottom: shape.y + shape.height,
+      centerX: shape.x + shape.width / 2,
+      centerY: shape.y + shape.height / 2,
     };
   }
 
@@ -2806,24 +2574,13 @@ function getShapeBounds(shape: Shape) {
   }
 
   if (shape.type === "socket" || shape.type === "switch") {
-    const geometry = getSelectionGeometry(shape);
-    const points = [
-      geometry.corners.nw,
-      geometry.corners.ne,
-      geometry.corners.se,
-      geometry.corners.sw,
-    ];
-
-    const xs = points.map((point) => point.x);
-    const ys = points.map((point) => point.y);
-
     return {
-      left: Math.min(...xs),
-      right: Math.max(...xs),
-      top: Math.min(...ys),
-      bottom: Math.max(...ys),
-      centerX: geometry.center.x,
-      centerY: geometry.center.y,
+      left: shape.x - shape.width / 2,
+      right: shape.x + shape.width / 2,
+      top: shape.y - shape.height / 2,
+      bottom: shape.y + shape.height / 2,
+      centerX: shape.x,
+      centerY: shape.y,
     };
   }
 
@@ -2983,7 +2740,6 @@ function transformShape(
   point: { x: number; y: number },
   allShapes: Shape[]
 ): Shape {
-  if (isShapeLocked(shape)) return shape;
   const dx = point.x - interaction.startPointer.x;
   const dy = point.y - interaction.startPointer.y;
   const initial = interaction.initialShape;
@@ -3302,78 +3058,41 @@ function getSelectionGeometry(
     rotateHandle,
   };
 }
-
-function isScreenPointInsideCenteredSquare(
-  screenPoint: { x: number; y: number },
-  target: { x: number; y: number },
-  size: number
-) {
-  const half = size / 2;
-  return (
-    screenPoint.x >= target.x - half &&
-    screenPoint.x <= target.x + half &&
-    screenPoint.y >= target.y - half &&
-    screenPoint.y <= target.y + half
-  );
-}
-
-function getSquareHandleDistance(
-  screenPoint: { x: number; y: number },
-  target: { x: number; y: number }
-) {
-  return distance(screenPoint.x, screenPoint.y, target.x, target.y);
-}
-
 function hitTestHandleScreen(
   screenPoint: { x: number; y: number },
   shape: Shape,
   camera: CameraState
 ): HandleType | null {
-  const cornerSizePx = 18;
-  const sideSizePx = 16;
-  const rotateSizePx = 18;
-  const lineEndSizePx = 18;
-  const lineMidSizePx = 16;
-  const circleHandleSizePx = 18;
+  const cornerRadiusPx = 34;
+  const sideRadiusPx = 28;
+  const rotateRadiusPx = 24;
+  const lineEndRadiusPx = 22;
+  const lineMidRadiusPx = 24;
 
-  const worldToScreen = (worldX: number, worldY: number) =>
-    projectWorldToScreen(worldX, worldY, camera);
+  const distToWorldPoint = (worldX: number, worldY: number) => {
+    const p = projectWorldToScreen(worldX, worldY, camera);
+    return distance(screenPoint.x, screenPoint.y, p.x, p.y);
+  };
 
   if (shape.type === "line" || shape.type === "cable") {
-    const start = worldToScreen(shape.x, shape.y);
-    const end = worldToScreen(shape.x2, shape.y2);
-    const mid = worldToScreen((shape.x + shape.x2) / 2, (shape.y + shape.y2) / 2);
+    const midX = (shape.x + shape.x2) / 2;
+    const midY = (shape.y + shape.y2) / 2;
 
-    const candidates: Array<{
-      type: HandleType;
-      point: { x: number; y: number };
-      size: number;
-    }> = [
-      { type: "line-start", point: start, size: lineEndSizePx },
-      { type: "line-end", point: end, size: lineEndSizePx },
-      { type: "move", point: mid, size: lineMidSizePx },
-    ];
+    const startDist = distToWorldPoint(shape.x, shape.y);
+    const endDist = distToWorldPoint(shape.x2, shape.y2);
+    const midDist = distToWorldPoint(midX, midY);
 
-    const nearest = candidates
-      .filter((candidate) =>
-        isScreenPointInsideCenteredSquare(screenPoint, candidate.point, candidate.size)
-      )
-      .sort(
-        (a, b) =>
-          getSquareHandleDistance(screenPoint, a.point) -
-          getSquareHandleDistance(screenPoint, b.point)
-      )[0];
+    if (startDist <= lineEndRadiusPx && startDist <= endDist) return "line-start";
+    if (endDist <= lineEndRadiusPx) return "line-end";
+    if (midDist <= lineMidRadiusPx) return "move";
 
-    return nearest ? nearest.type : null;
+    return null;
   }
 
   if (shape.type === "circle") {
-    const handle = worldToScreen(shape.x + shape.radius, shape.y);
-
-    if (isScreenPointInsideCenteredSquare(screenPoint, handle, circleHandleSizePx)) {
+    if (distToWorldPoint(shape.x + shape.radius, shape.y) <= cornerRadiusPx) {
       return "resize-circle";
     }
-
     return null;
   }
 
@@ -3385,72 +3104,63 @@ function hitTestHandleScreen(
   ) {
     const geometry = getSelectionGeometry(shape);
 
-    const rotateHandle = worldToScreen(geometry.rotateHandle.x, geometry.rotateHandle.y);
-    if (isScreenPointInsideCenteredSquare(screenPoint, rotateHandle, rotateSizePx)) {
+    const rotateDist = distToWorldPoint(
+      geometry.rotateHandle.x,
+      geometry.rotateHandle.y
+    );
+    if (rotateDist <= rotateRadiusPx) {
       return "rotate";
     }
 
-    const cornerCandidates: Array<{ type: HandleType; point: { x: number; y: number } }> = [
+    const cornerCandidates: Array<{ type: HandleType; dist: number }> = [
       {
         type: "resize-nw",
-        point: worldToScreen(geometry.corners.nw.x, geometry.corners.nw.y),
+        dist: distToWorldPoint(geometry.corners.nw.x, geometry.corners.nw.y),
       },
       {
         type: "resize-ne",
-        point: worldToScreen(geometry.corners.ne.x, geometry.corners.ne.y),
+        dist: distToWorldPoint(geometry.corners.ne.x, geometry.corners.ne.y),
       },
       {
         type: "resize-se",
-        point: worldToScreen(geometry.corners.se.x, geometry.corners.se.y),
+        dist: distToWorldPoint(geometry.corners.se.x, geometry.corners.se.y),
       },
       {
         type: "resize-sw",
-        point: worldToScreen(geometry.corners.sw.x, geometry.corners.sw.y),
+        dist: distToWorldPoint(geometry.corners.sw.x, geometry.corners.sw.y),
       },
     ];
 
     const nearestCorner = cornerCandidates
-      .filter((candidate) =>
-        isScreenPointInsideCenteredSquare(screenPoint, candidate.point, cornerSizePx)
-      )
-      .sort(
-        (a, b) =>
-          getSquareHandleDistance(screenPoint, a.point) -
-          getSquareHandleDistance(screenPoint, b.point)
-      )[0];
+      .filter((item) => item.dist <= cornerRadiusPx)
+      .sort((a, b) => a.dist - b.dist)[0];
 
     if (nearestCorner) {
       return nearestCorner.type;
     }
 
-    const sideCandidates: Array<{ type: HandleType; point: { x: number; y: number } }> = [
+    const sideCandidates: Array<{ type: HandleType; dist: number }> = [
       {
         type: "resize-n",
-        point: worldToScreen(geometry.sides.n.x, geometry.sides.n.y),
+        dist: distToWorldPoint(geometry.sides.n.x, geometry.sides.n.y),
       },
       {
         type: "resize-e",
-        point: worldToScreen(geometry.sides.e.x, geometry.sides.e.y),
+        dist: distToWorldPoint(geometry.sides.e.x, geometry.sides.e.y),
       },
       {
         type: "resize-s",
-        point: worldToScreen(geometry.sides.s.x, geometry.sides.s.y),
+        dist: distToWorldPoint(geometry.sides.s.x, geometry.sides.s.y),
       },
       {
         type: "resize-w",
-        point: worldToScreen(geometry.sides.w.x, geometry.sides.w.y),
+        dist: distToWorldPoint(geometry.sides.w.x, geometry.sides.w.y),
       },
     ];
 
     const nearestSide = sideCandidates
-      .filter((candidate) =>
-        isScreenPointInsideCenteredSquare(screenPoint, candidate.point, sideSizePx)
-      )
-      .sort(
-        (a, b) =>
-          getSquareHandleDistance(screenPoint, a.point) -
-          getSquareHandleDistance(screenPoint, b.point)
-      )[0];
+      .filter((item) => item.dist <= sideRadiusPx)
+      .sort((a, b) => a.dist - b.dist)[0];
 
     if (nearestSide) {
       return nearestSide.type;
@@ -3460,56 +3170,80 @@ function hitTestHandleScreen(
   return null;
 }
   
-function renderSelectionOverlayScreen(shape: Shape, camera: CameraState) {
-  const mainSize = 18;
-  const sideSize = 16;
-  const lineEndSize = 18;
-  const lineMidSize = 16;
+function renderSelectionOverlayScreen(
+  shape: Shape,
+  camera: CameraState,
+  onHandleMouseDown: (
+    e: React.MouseEvent<SVGElement>,
+    shape: Shape,
+    mode: HandleType
+  ) => void
+) {
+  const cornerSize = 16;
+  const sideSize = 14;
+  const rotateSize = 16;
   const anchorR = 4;
 
   const renderSquareHandle = (
     x: number,
     y: number,
     size: number,
-    fill: string,
-    stroke: string,
-    strokeWidth: number
+    mode: HandleType,
+    cursor: React.CSSProperties["cursor"],
+    variant: "corner" | "side" | "rotate" | "line" = "corner"
   ) => {
-    const inner = Math.max(4, size * 0.42);
-    const halfInner = inner / 2;
+    const half = size / 2;
 
     return (
-      <g>
+      <g
+        key={`${mode}-${x}-${y}`}
+        pointerEvents="all"
+        onMouseDown={(e) => onHandleMouseDown(e, shape, mode)}
+        style={{ cursor }}
+      >
         <rect
-          x={x - size / 2}
-          y={y - size / 2}
+          x={x - half}
+          y={y - half}
           width={size}
           height={size}
-          fill={fill}
-          stroke={stroke}
-          strokeWidth={strokeWidth}
-          rx="3"
+          rx={variant === "rotate" ? 5 : 3}
+          fill={variant === "side" ? "#dfe8ff" : "#ffffff"}
+          stroke="#3d63ff"
+          strokeWidth="2.5"
         />
-        <line
-          x1={x - halfInner}
-          y1={y}
-          x2={x + halfInner}
-          y2={y}
-          stroke={stroke}
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          opacity="0.95"
-        />
-        <line
-          x1={x}
-          y1={y - halfInner}
-          x2={x}
-          y2={y + halfInner}
-          stroke={stroke}
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          opacity="0.95"
-        />
+        {variant === "corner" ? (
+          <path
+            d={`M ${x - 3.5} ${y + 3.5} L ${x + 3.5} ${y - 3.5}`}
+            stroke="#3d63ff"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          />
+        ) : null}
+        {variant === "side" ? (
+          <path
+            d={`M ${x - 3.5} ${y} L ${x + 3.5} ${y}`}
+            stroke="#3d63ff"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          />
+        ) : null}
+        {variant === "rotate" ? (
+          <path
+            d={`M ${x - 3} ${y} A 3 3 0 1 1 ${x + 2.8} ${y - 1}`}
+            fill="none"
+            stroke="#3d63ff"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+          />
+        ) : null}
+        {variant === "line" ? (
+          <path
+            d={`M ${x - 3} ${y} L ${x + 3} ${y}`}
+            stroke="#3d63ff"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          />
+        ) : null}
       </g>
     );
   };
@@ -3520,10 +3254,10 @@ function renderSelectionOverlayScreen(shape: Shape, camera: CameraState) {
     const mid = projectWorldToScreen((shape.x + shape.x2) / 2, (shape.y + shape.y2) / 2, camera);
 
     return (
-      <g pointerEvents="none">
-        {renderSquareHandle(a.x, a.y, lineEndSize, "#fff", "#3d63ff", 3)}
-        {renderSquareHandle(b.x, b.y, lineEndSize, "#fff", "#3d63ff", 3)}
-        {renderSquareHandle(mid.x, mid.y, lineMidSize, "#3d63ff", "#fff", 2)}
+      <g>
+        {renderSquareHandle(a.x, a.y, 16, "line-start", "move", "line")}
+        {renderSquareHandle(b.x, b.y, 16, "line-end", "move", "line")}
+        {renderSquareHandle(mid.x, mid.y, 14, "move", "move", "side")}
       </g>
     );
   }
@@ -3537,20 +3271,22 @@ function renderSelectionOverlayScreen(shape: Shape, camera: CameraState) {
     const handle = projectWorldToScreen(shape.x + shape.radius, shape.y, camera);
 
     return (
-      <g pointerEvents="none">
-        {anchors.map((a) => (
-          <circle
-            key={a.id}
-            cx={a.x}
-            cy={a.y}
-            r={anchorR}
-            fill="#9ec1ff"
-            stroke="#fff"
-            strokeWidth="1.5"
-          />
-        ))}
+      <g>
+        <g pointerEvents="none">
+          {anchors.map((a) => (
+            <circle
+              key={a.id}
+              cx={a.x}
+              cy={a.y}
+              r={anchorR}
+              fill="#9ec1ff"
+              stroke="#fff"
+              strokeWidth="1.5"
+            />
+          ))}
+        </g>
 
-        {renderSquareHandle(handle.x, handle.y, mainSize, "#fff", "#3d63ff", 3)}
+        {renderSquareHandle(handle.x, handle.y, cornerSize, "resize-circle", "ew-resize", "corner")}
       </g>
     );
   }
@@ -3585,40 +3321,42 @@ function renderSelectionOverlayScreen(shape: Shape, camera: CameraState) {
     };
 
     return (
-      <g pointerEvents="none">
-        {anchors.map((a) => (
-          <circle
-            key={a.id}
-            cx={a.x}
-            cy={a.y}
-            r={anchorR}
-            fill="#9ec1ff"
-            stroke="#fff"
-            strokeWidth="1.5"
+      <g>
+        <g pointerEvents="none">
+          {anchors.map((a) => (
+            <circle
+              key={a.id}
+              cx={a.x}
+              cy={a.y}
+              r={anchorR}
+              fill="#9ec1ff"
+              stroke="#fff"
+              strokeWidth="1.5"
+            />
+          ))}
+
+          <line
+            x1={center.x}
+            y1={center.y}
+            x2={rotateHandle.x}
+            y2={rotateHandle.y}
+            stroke="#79a6ff"
+            strokeWidth="2"
+            opacity="0.7"
           />
-        ))}
+        </g>
 
-        <line
-          x1={center.x}
-          y1={center.y}
-          x2={rotateHandle.x}
-          y2={rotateHandle.y}
-          stroke="#79a6ff"
-          strokeWidth="2"
-          opacity="0.7"
-        />
+        {renderSquareHandle(corners.nw.x, corners.nw.y, cornerSize, "resize-nw", "nwse-resize", "corner")}
+        {renderSquareHandle(corners.ne.x, corners.ne.y, cornerSize, "resize-ne", "nesw-resize", "corner")}
+        {renderSquareHandle(corners.se.x, corners.se.y, cornerSize, "resize-se", "nwse-resize", "corner")}
+        {renderSquareHandle(corners.sw.x, corners.sw.y, cornerSize, "resize-sw", "nesw-resize", "corner")}
 
-        {renderSquareHandle(corners.nw.x, corners.nw.y, mainSize, "#fff", "#3d63ff", 3)}
-        {renderSquareHandle(corners.ne.x, corners.ne.y, mainSize, "#fff", "#3d63ff", 3)}
-        {renderSquareHandle(corners.se.x, corners.se.y, mainSize, "#fff", "#3d63ff", 3)}
-        {renderSquareHandle(corners.sw.x, corners.sw.y, mainSize, "#fff", "#3d63ff", 3)}
+        {renderSquareHandle(sides.n.x, sides.n.y, sideSize, "resize-n", "ns-resize", "side")}
+        {renderSquareHandle(sides.e.x, sides.e.y, sideSize, "resize-e", "ew-resize", "side")}
+        {renderSquareHandle(sides.s.x, sides.s.y, sideSize, "resize-s", "ns-resize", "side")}
+        {renderSquareHandle(sides.w.x, sides.w.y, sideSize, "resize-w", "ew-resize", "side")}
 
-        {renderSquareHandle(sides.n.x, sides.n.y, sideSize, "#dfe8ff", "#3d63ff", 2.5)}
-        {renderSquareHandle(sides.e.x, sides.e.y, sideSize, "#dfe8ff", "#3d63ff", 2.5)}
-        {renderSquareHandle(sides.s.x, sides.s.y, sideSize, "#dfe8ff", "#3d63ff", 2.5)}
-        {renderSquareHandle(sides.w.x, sides.w.y, sideSize, "#dfe8ff", "#3d63ff", 2.5)}
-
-        {renderSquareHandle(rotateHandle.x, rotateHandle.y, mainSize, "#fff", "#3d63ff", 3)}
+        {renderSquareHandle(rotateHandle.x, rotateHandle.y, rotateSize, "rotate", "crosshair", "rotate")}
       </g>
     );
   }
@@ -3690,17 +3428,6 @@ function projectWorldToScreen(
     y: camera.y + worldY * camera.zoom,
   };
 }
-function screenToWorldPoint(
-  screenX: number,
-  screenY: number,
-  camera: CameraState
-) {
-  return {
-    x: (screenX - camera.x) / camera.zoom,
-    y: (screenY - camera.y) / camera.zoom,
-  };
-}
-
 function rotatePoint(px: number, py: number, cx: number, cy: number, angleDegValue: number) {
   const angle = (angleDegValue * Math.PI) / 180;
   const cos = Math.cos(angle);
@@ -3735,42 +3462,6 @@ function isSideResizeHandle(handle: HandleType) {
     handle === "resize-w"
   );
 }
-function isShapeLocked(shape: Shape | null | undefined) {
-  return Boolean(shape?.locked);
-}
-
-function moveShapeInStack(
-  shapes: Shape[],
-  shapeId: string,
-  direction: "backward" | "forward" | "to-back" | "to-front"
-) {
-  const index = shapes.findIndex((shape) => shape.id === shapeId);
-  if (index === -1) return shapes;
-
-  const next = [...shapes];
-  const [item] = next.splice(index, 1);
-
-  if (direction === "to-back") {
-    next.unshift(item);
-    return next;
-  }
-
-  if (direction === "to-front") {
-    next.push(item);
-    return next;
-  }
-
-  if (direction === "backward") {
-    const targetIndex = Math.max(0, index - 1);
-    next.splice(targetIndex, 0, item);
-    return next;
-  }
-
-  const targetIndex = Math.min(next.length, index + 1);
-  next.splice(targetIndex, 0, item);
-  return next;
-}
-
 function getCursorByHandle(handle: HandleType): React.CSSProperties["cursor"] {
   switch (handle) {
     case "move":
@@ -3967,93 +3658,9 @@ function lineLengthMeters(shape: LineShape, metersPerPixel: number) {
   return metersPerPixel > 0 ? px * metersPerPixel : px;
 }
 
-function pointInRotatedRectWorld(
-  px: number,
-  py: number,
-  centerX: number,
-  centerY: number,
-  width: number,
-  height: number,
-  rotation: number,
-  padding = 0
-) {
-  const angle = (-rotation * Math.PI) / 180;
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  const dx = px - centerX;
-  const dy = py - centerY;
-
-  const localX = dx * cos - dy * sin;
-  const localY = dx * sin + dy * cos;
-
-  return (
-    Math.abs(localX) <= width / 2 + padding &&
-    Math.abs(localY) <= height / 2 + padding
-  );
-}
-
-function screenPaddingToWorld(camera: CameraState, px: number) {
-  return px / Math.max(camera.zoom, 0.0001);
-}
-
-function hitTestShapeScreen(
-  screenPoint: { x: number; y: number },
-  shape: Shape,
-  camera: CameraState
-) {
-  const worldPoint = screenToWorldPoint(screenPoint.x, screenPoint.y, camera);
-  const worldPadding = screenPaddingToWorld(camera, 12);
-
-  if (shape.type === "rectangle" || shape.type === "cad") {
-    return pointInRotatedRectWorld(
-      worldPoint.x,
-      worldPoint.y,
-      shape.x + shape.width / 2,
-      shape.y + shape.height / 2,
-      shape.width,
-      shape.height,
-      shape.rotation,
-      worldPadding
-    );
-  }
-
-  if (shape.type === "socket" || shape.type === "switch") {
-    return pointInRotatedRectWorld(
-      worldPoint.x,
-      worldPoint.y,
-      shape.x,
-      shape.y,
-      shape.width,
-      shape.height,
-      shape.rotation,
-      worldPadding
-    );
-  }
-
-  if (shape.type === "circle") {
-    return distance(worldPoint.x, worldPoint.y, shape.x, shape.y) <= shape.radius + worldPadding;
-  }
-
-  if (shape.type === "line" || shape.type === "cable") {
-    const a = projectWorldToScreen(shape.x, shape.y, camera);
-    const b = projectWorldToScreen(shape.x2, shape.y2, camera);
-    return distancePointToSegment(screenPoint.x, screenPoint.y, a.x, a.y, b.x, b.y) <= 12;
-  }
-
-  return false;
-}
-
 function isPointOnShape(px: number, py: number, shape: Shape) {
   if (shape.type === "rectangle" || shape.type === "cad") {
-    return pointInRotatedRectWorld(
-      px,
-      py,
-      shape.x + shape.width / 2,
-      shape.y + shape.height / 2,
-      shape.width,
-      shape.height,
-      shape.rotation
-    );
+    return px >= shape.x && px <= shape.x + shape.width && py >= shape.y && py <= shape.y + shape.height;
   }
 
   if (shape.type === "circle") {
@@ -4065,14 +3672,11 @@ function isPointOnShape(px: number, py: number, shape: Shape) {
   }
 
   if (shape.type === "socket" || shape.type === "switch") {
-    return pointInRotatedRectWorld(
-      px,
-      py,
-      shape.x,
-      shape.y,
-      shape.width,
-      shape.height,
-      shape.rotation
+    return (
+      px >= shape.x - shape.width / 2 &&
+      px <= shape.x + shape.width / 2 &&
+      py >= shape.y - shape.height / 2 &&
+      py <= shape.y + shape.height / 2
     );
   }
 
