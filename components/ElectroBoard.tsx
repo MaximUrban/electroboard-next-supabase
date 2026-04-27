@@ -15,6 +15,7 @@ type Tool =
   | "calibrate";
 
 type StrokeStyle = "solid" | "dashed";
+type SaveState = "saved" | "saving";
 
 type ShapeStyle = {
   strokeColor: string;
@@ -166,10 +167,12 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   const [calibrationDistanceMeters, setCalibrationDistanceMeters] = useState("1");
   const [status, setStatus] = useState("Готово");
   const [loaded, setLoaded] = useState(false);
-  const [savingPulse, setSavingPulse] = useState(false);
+  const [saveState, setSaveState] = useState<SaveState>("saved");
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [camera, setCamera] = useState<CameraState>({ x: 0, y: 0, zoom: 1 });
   const [panState, setPanState] = useState<PanState | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [canvasSize] = useState({ width: 1400, height: 900 });
 
   const [history, setHistory] = useState<HistoryState[]>([]);
@@ -197,6 +200,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       setShapes(nextShapes);
       setMetersPerPixel(nextMPP);
       setCalibrationPoints(nextCalibration);
+      setLastSavedAt(saved.updatedAt || null);
 
       const initial: HistoryState = {
         shapes: nextShapes,
@@ -229,23 +233,21 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
   useEffect(() => {
     if (!loaded) return;
 
-    const timer = window.setInterval(() => {
-      persistProject();
-    }, 20000);
-
-    return () => window.clearInterval(timer);
-  }, [loaded, projectId, projectName, shapes, metersPerPixel, calibrationPoints]);
-
-  useEffect(() => {
-    if (!loaded) return;
-
     const onBeforeUnload = () => {
-      persistProject(false);
+      persistProjectData(
+        {
+          shapes,
+          metersPerPixel,
+          calibrationPoints,
+          projectName,
+        },
+        false
+      );
     };
 
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [loaded, projectId, projectName, shapes, metersPerPixel, calibrationPoints]);
+  }, [loaded, shapes, metersPerPixel, calibrationPoints, projectName, projectId]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -300,29 +302,44 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [loaded, selectedId, history, historyIndex]);
 
-  function persistProject(showPulse = true) {
+  function persistProjectData(data: HistoryState, animate = true) {
+    if (!loaded) return;
+
+    setSaveState("saving");
+
     const existing = getProjectById(projectId);
     const now = Date.now();
 
     saveProject({
       id: projectId,
-      name: projectName,
+      name: data.projectName,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       data: {
-        shapes,
-        metersPerPixel,
-        calibrationPoints,
+        shapes: data.shapes,
+        metersPerPixel: data.metersPerPixel,
+        calibrationPoints: data.calibrationPoints,
       },
     });
 
     setLastSavedAt(now);
-    setStatus("Автосохранено");
+    setSaveState("saved");
+    setStatus("Сохранено");
 
-    if (showPulse) {
-      setSavingPulse(true);
-      window.setTimeout(() => setSavingPulse(false), 900);
+    if (animate) {
+      window.setTimeout(() => {
+        setStatus("Готово");
+      }, 700);
     }
+  }
+
+  function persistCurrent() {
+    persistProjectData({
+      shapes,
+      metersPerPixel,
+      calibrationPoints,
+      projectName,
+    });
   }
 
   function pushHistory(next: HistoryState) {
@@ -336,8 +353,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
       const updated = [...trimmed, cloneDeep(next)];
       const capped = updated.slice(-100);
-      const newIndex = capped.length - 1;
-      setHistoryIndex(newIndex);
+      setHistoryIndex(capped.length - 1);
       return capped;
     });
   }
@@ -348,12 +364,15 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     nextMetersPerPixel?: number,
     nextProjectName?: string
   ) {
-    pushHistory({
+    const nextState: HistoryState = {
       shapes: cloneDeep(nextShapes ?? shapes),
       calibrationPoints: cloneDeep(nextCalibrationPoints ?? calibrationPoints),
       metersPerPixel: nextMetersPerPixel ?? metersPerPixel,
       projectName: nextProjectName ?? projectName,
-    });
+    };
+
+    pushHistory(nextState);
+    persistProjectData(nextState);
   }
 
   function applyHistoryState(state: HistoryState) {
@@ -364,6 +383,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     setSelectedId(null);
     setInteraction(null);
     setDraftLine(null);
+    persistProjectData(state, false);
     setStatus("История применена");
   }
 
@@ -495,6 +515,22 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       x: canvasSize.width / 2,
       y: canvasSize.height / 2,
       zoom: 1,
+    });
+  }
+
+  function convertSelectedShapeType(nextType: Shape["type"]) {
+    if (!selectedShape) return;
+    if (selectedShape.type === nextType) return;
+
+    setShapes((prev) => {
+      const next = prev.map((shape) => {
+        if (shape.id !== selectedShape.id) return shape;
+        return convertShapeType(shape, nextType);
+      });
+
+      const applied = applyAttachments(next);
+      window.setTimeout(() => commitHistory(applied), 0);
+      return applied;
     });
   }
 
@@ -780,10 +816,8 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
   function handleWheel(e: React.WheelEvent<SVGSVGElement>) {
     e.preventDefault();
-
     const screen = getScreenPoint(e.clientX, e.clientY);
     const factor = e.deltaY < 0 ? 1.1 : 0.9;
-
     zoomAtScreenPoint(screen.x, screen.y, factor);
   }
 
@@ -797,16 +831,31 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     setSelectedId(null);
   }
 
-  function clearAll() {
+  function clearAllConfirmed() {
     setShapes([]);
     setSelectedId(null);
     setDraftLine(null);
     setCalibrationPoints([]);
     setInteraction(null);
     setPanState(null);
-    setStatus("Холст очищен");
+    setShowClearConfirm(false);
+    setStatus("Проект очищен");
     window.setTimeout(() => commitHistory([], [], 0), 0);
   }
+
+  const objectTypeOptions = selectedShape
+    ? selectedShape.type === "line" || selectedShape.type === "cable"
+      ? [
+          { value: "line", label: "Линия" },
+          { value: "cable", label: "Кабель" },
+        ]
+      : [
+          { value: "rectangle", label: "Прямоугольник" },
+          { value: "circle", label: "Окружность" },
+          { value: "socket", label: "Розетка" },
+          { value: "switch", label: "Выключатель" },
+        ]
+    : [];
 
   return (
     <div style={styles.page}>
@@ -836,8 +885,16 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
           <button style={tool === "socket" ? styles.btnActive : styles.btn} onClick={() => setTool("socket")}>Розетка</button>
           <button style={tool === "switch" ? styles.btnActive : styles.btn} onClick={() => setTool("switch")}>Выключатель</button>
           <button style={tool === "calibrate" ? styles.btnActive : styles.btn} onClick={() => setTool("calibrate")}>Масштаб</button>
-          <button style={styles.btn} onClick={undo}>Undo</button>
-          <button style={styles.btn} onClick={redo}>Redo</button>
+
+          <button style={styles.iconBtn} onClick={undo} title="Undo">
+            <IconUndo />
+          </button>
+          <button style={styles.iconBtn} onClick={redo} title="Redo">
+            <IconRedo />
+          </button>
+          <button style={styles.iconBtn} onClick={() => setShowHelp(true)} title="Помощь">
+            <IconHelp />
+          </button>
         </div>
       </div>
 
@@ -940,85 +997,119 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
         <div style={styles.sidebar}>
           <div style={styles.card}>
             <div style={styles.cardTitle}>Калибровка</div>
-            <div style={styles.field}>
+            <div style={styles.compactField}>
               <label style={styles.label}>Реальное расстояние, м</label>
               <input
                 value={calibrationDistanceMeters}
                 onChange={(e) => setCalibrationDistanceMeters(e.target.value)}
-                style={styles.input}
+                style={styles.inputCompact}
                 type="number"
                 step="0.01"
               />
             </div>
-            <div style={styles.hint}>
+            <div style={styles.hintCompact}>
               Выберите <b>Масштаб</b> и нажмите две точки.
             </div>
           </div>
 
           <div style={styles.card}>
-            <div style={styles.cardTitle}>Свойства объекта</div>
+            <div style={styles.cardTitle}>Объект</div>
 
             {!selectedShape ? (
-              <div style={styles.hint}>Ничего не выбрано</div>
+              <div style={styles.hintCompact}>Ничего не выбрано</div>
             ) : (
               <>
-                <div style={styles.field}>
+                <div style={styles.compactField}>
                   <label style={styles.label}>Тип</label>
-                  <input value={selectedShape.type} readOnly style={styles.input} />
+                  <select
+                    value={selectedShape.type}
+                    onChange={(e) => convertSelectedShapeType(e.target.value as Shape["type"])}
+                    style={styles.inputCompact}
+                  >
+                    {objectTypeOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
-                <div style={styles.field}>
+                <div style={styles.compactField}>
                   <label style={styles.label}>Название</label>
                   <input
                     value={selectedShape.label}
                     onChange={(e) => setShapePatch(selectedShape.id, { label: e.target.value })}
-                    style={styles.input}
+                    style={styles.inputCompact}
                   />
                 </div>
 
-                <div style={styles.field}>
+                <div style={styles.compactField}>
                   <label style={styles.label}>Группа</label>
                   <input
                     value={selectedShape.groupName || ""}
                     onChange={(e) => setShapePatch(selectedShape.id, { groupName: e.target.value })}
-                    style={styles.input}
+                    style={styles.inputCompact}
                   />
                 </div>
 
                 {(selectedShape.type === "line" || selectedShape.type === "cable") && (
-                  <div style={styles.field}>
-                    <label style={styles.label}>Тип кабеля</label>
+                  <div style={styles.compactField}>
+                    <label style={styles.label}>Кабель</label>
                     <input
                       value={selectedShape.cableType || ""}
                       onChange={(e) => setShapePatch(selectedShape.id, { cableType: e.target.value })}
-                      style={styles.input}
+                      style={styles.inputCompact}
                     />
                   </div>
                 )}
 
-                <div style={styles.field}>
-                  <label style={styles.label}>Цвет линии</label>
-                  <input
-                    type="color"
-                    value={safeColor(selectedShape.strokeColor)}
-                    onChange={(e) => setShapePatch(selectedShape.id, { strokeColor: e.target.value })}
-                    style={styles.colorInput}
-                  />
-                </div>
+                <div style={styles.rowLabel}>Стиль</div>
 
-                {selectedShape.type !== "line" && selectedShape.type !== "cable" ? (
-                  <div style={styles.field}>
-                    <label style={styles.label}>Цвет заливки</label>
+                <div style={styles.styleRow}>
+                  <label style={styles.colorSwatchLabel} title="Цвет линии">
                     <input
                       type="color"
-                      value={safeColor(selectedShape.fillColor)}
-                      onChange={(e) => setShapePatch(selectedShape.id, { fillColor: e.target.value })}
-                      style={styles.colorInput}
+                      value={safeColor(selectedShape.strokeColor)}
+                      onChange={(e) => setShapePatch(selectedShape.id, { strokeColor: e.target.value })}
+                      style={styles.hiddenColorInput}
                     />
-                  </div>
-                ) : null}
+                    <span style={{ ...styles.colorSwatch, background: safeColor(selectedShape.strokeColor) }} />
+                  </label>
 
-                <div style={styles.field}>
+                  {selectedShape.type !== "line" && selectedShape.type !== "cable" ? (
+                    <label style={styles.colorSwatchLabel} title="Цвет заливки">
+                      <input
+                        type="color"
+                        value={safeColor(selectedShape.fillColor)}
+                        onChange={(e) => setShapePatch(selectedShape.id, { fillColor: e.target.value })}
+                        style={styles.hiddenColorInput}
+                      />
+                      <span style={{ ...styles.colorSwatch, background: safeColor(selectedShape.fillColor) }} />
+                    </label>
+                  ) : (
+                    <span style={styles.colorSwatchGhost} />
+                  )}
+
+                  <button
+                    type="button"
+                    style={selectedShape.strokeStyle === "solid" ? styles.lineStyleBtnActive : styles.lineStyleBtn}
+                    onClick={() => setShapePatch(selectedShape.id, { strokeStyle: "solid" })}
+                    title="Сплошная"
+                  >
+                    <span style={styles.solidPreview} />
+                  </button>
+
+                  <button
+                    type="button"
+                    style={selectedShape.strokeStyle === "dashed" ? styles.lineStyleBtnActive : styles.lineStyleBtn}
+                    onClick={() => setShapePatch(selectedShape.id, { strokeStyle: "dashed" })}
+                    title="Пунктир"
+                  >
+                    <span style={styles.dashedPreview} />
+                  </button>
+                </div>
+
+                <div style={styles.compactField}>
                   <label style={styles.label}>Толщина: {selectedShape.strokeWidth}</label>
                   <input
                     type="range"
@@ -1029,7 +1120,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
                   />
                 </div>
 
-                <div style={styles.field}>
+                <div style={styles.compactField}>
                   <label style={styles.label}>Прозрачность: {selectedShape.opacity.toFixed(2)}</label>
                   <input
                     type="range"
@@ -1041,24 +1132,10 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
                   />
                 </div>
 
-                <div style={styles.field}>
-                  <label style={styles.label}>Тип линии</label>
-                  <select
-                    value={selectedShape.strokeStyle}
-                    onChange={(e) =>
-                      setShapePatch(selectedShape.id, { strokeStyle: e.target.value as StrokeStyle })
-                    }
-                    style={styles.input}
-                  >
-                    <option value="solid">Сплошная</option>
-                    <option value="dashed">Пунктир</option>
-                  </select>
-                </div>
-
                 {selectedShape.type !== "circle" &&
                 selectedShape.type !== "line" &&
                 selectedShape.type !== "cable" ? (
-                  <div style={styles.field}>
+                  <div style={styles.compactField}>
                     <label style={styles.label}>Поворот: {Math.round(selectedShape.rotation)}°</label>
                     <input
                       type="range"
@@ -1071,22 +1148,10 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
                 ) : null}
 
                 {(selectedShape.type === "line" || selectedShape.type === "cable") && (
-                  <div style={styles.hint}>
+                  <div style={styles.hintCompact}>
                     Длина: {lineLengthMeters(selectedShape, metersPerPixel).toFixed(2)} м
                   </div>
                 )}
-
-                <div style={styles.hint}>
-                  Горячие клавиши:
-                  <br />Delete / Backspace — удалить
-                  <br />Ctrl/Cmd + Z — назад
-                  <br />Ctrl/Cmd + Shift + Z или Ctrl/Cmd + Y — вперед
-                  <br />Стрелки — сдвиг 1px
-                  <br />Shift + стрелки — сдвиг 10px
-                  <br />Alt + drag — дублировать
-                  <br />Колесо — зум
-                  <br />Тянуть пустое место — двигать полотно
-                </div>
 
                 <button style={styles.deleteBtn} onClick={deleteSelected}>
                   Удалить объект
@@ -1096,11 +1161,11 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
           </div>
 
           <div style={styles.card}>
-            <div style={styles.cardTitle}>Смета кабеля</div>
+            <div style={styles.cardTitle}>Смета</div>
             {estimate.length === 0 ? (
-              <div style={styles.hint}>Нет кабельных линий</div>
+              <div style={styles.hintCompact}>Нет кабельных линий</div>
             ) : (
-              <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ display: "grid", gap: 6 }}>
                 {estimate.map((row, idx) => (
                   <div key={`${row.groupName}-${row.cableType}-${idx}`} style={styles.estimateRow}>
                     <div><b>{row.groupName || "Без группы"}</b></div>
@@ -1112,24 +1177,58 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
             )}
           </div>
 
-          <button style={styles.clearBtn} onClick={clearAll}>
+          <button style={styles.clearBtn} onClick={() => setShowClearConfirm(true)}>
             Очистить проект
           </button>
         </div>
       </div>
 
-      <div style={styles.saveBadge}>
-        <div
+      <button style={styles.saveBadge} onClick={persistCurrent} title="Сохранить сейчас">
+        <span
           style={{
             ...styles.saveDot,
-            transform: savingPulse ? "scale(1.25)" : "scale(1)",
-            opacity: savingPulse ? 1 : 0.65,
+            transform: saveState === "saving" ? "scale(1.25)" : "scale(1)",
+            opacity: saveState === "saving" ? 1 : 0.75,
           }}
         />
         <span style={styles.saveText}>
-          {lastSavedAt ? `Автосохранение` : `Ожидание`}
+          {saveState === "saving" ? "Сохранение..." : "Сохранить"}
         </span>
-      </div>
+        <span style={styles.saveTime}>
+          {lastSavedAt ? new Date(lastSavedAt).toLocaleTimeString() : ""}
+        </span>
+      </button>
+
+      {showHelp ? (
+        <Modal title="Горячие клавиши" onClose={() => setShowHelp(false)}>
+          <div style={styles.modalList}>
+            <div>Delete / Backspace — удалить выбранное</div>
+            <div>Ctrl/Cmd + Z — назад</div>
+            <div>Ctrl/Cmd + Shift + Z или Ctrl/Cmd + Y — вперед</div>
+            <div>Стрелки — сдвиг на 1px</div>
+            <div>Shift + стрелки — сдвиг на 10px</div>
+            <div>Alt + drag — дублирование без привязок</div>
+            <div>Колесо мыши — zoom</div>
+            <div>Тянуть пустое место — перемещение полотна</div>
+          </div>
+        </Modal>
+      ) : null}
+
+      {showClearConfirm ? (
+        <Modal title="Очистить проект?" onClose={() => setShowClearConfirm(false)}>
+          <div style={styles.modalText}>
+            Все объекты на текущем проекте будут удалены.
+          </div>
+          <div style={styles.modalActions}>
+            <button style={styles.modalBtn} onClick={() => setShowClearConfirm(false)}>
+              Отмена
+            </button>
+            <button style={styles.modalBtnDanger} onClick={clearAllConfirmed}>
+              Очистить
+            </button>
+          </div>
+        </Modal>
+      ) : null}
     </div>
   );
 }
@@ -1143,7 +1242,7 @@ function MiniMap({
   shapes: Shape[];
   camera: CameraState;
   canvasSize: { width: number; height: number };
-  onJump: (worldX: number, worldY: number) => void;
+  onJump: (worldX: number; worldY: number) => void;
 }) {
   const miniWidth = 220;
   const miniHeight = 150;
@@ -1265,6 +1364,30 @@ function MiniMap({
           strokeWidth="1.5"
         />
       </svg>
+    </div>
+  );
+}
+
+function Modal({
+  title,
+  children,
+  onClose,
+}: {
+  title: string;
+  children: React.ReactNode;
+  onClose: () => void;
+}) {
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.modalHeader}>
+          <div style={styles.modalTitle}>{title}</div>
+          <button style={styles.iconBtnSmall} onClick={onClose}>
+            <IconClose />
+          </button>
+        </div>
+        {children}
+      </div>
     </div>
   );
 }
@@ -1448,97 +1571,131 @@ function renderSelectionOverlay(shape: Shape) {
   return null;
 }
 
-function transformShape(shape: Shape, interaction: InteractionState, point: { x: number; y: number }): Shape {
-  const dx = point.x - interaction.startPointer.x;
-  const dy = point.y - interaction.startPointer.y;
-  const initial = interaction.initialShape;
+function convertShapeType(shape: Shape, nextType: Shape["type"]): Shape {
+  if (shape.type === nextType) return shape;
 
-  if (interaction.mode === "move") {
-    if (shape.type === "line" || shape.type === "cable") {
-      const s = initial as LineShape;
-      return {
-        ...shape,
-        x: s.x + dx,
-        y: s.y + dy,
-        x2: s.x2 + dx,
-        y2: s.y2 + dy,
-      };
-    }
-    if (shape.type === "circle") {
-      const s = initial as CircleShape;
-      return { ...shape, x: s.x + dx, y: s.y + dy };
-    }
-    if (shape.type === "rectangle") {
-      const s = initial as RectangleShape;
-      return { ...shape, x: s.x + dx, y: s.y + dy };
-    }
-    const s = initial as SocketShape | SwitchShape;
-    return { ...shape, x: s.x + dx, y: s.y + dy };
+  if ((shape.type === "line" || shape.type === "cable") && (nextType === "line" || nextType === "cable")) {
+    return {
+      ...shape,
+      type: nextType,
+      label: nextType === "cable" ? "Кабель" : "Линия",
+      cableType: nextType === "cable" ? shape.cableType || "ВВГнг 3x2.5" : "",
+      strokeColor: nextType === "cable" ? "#ffbf47" : shape.strokeColor,
+      strokeWidth: nextType === "cable" ? Math.max(shape.strokeWidth, 4) : Math.min(shape.strokeWidth, 4),
+    };
   }
 
-  if (interaction.mode === "line-start" && (shape.type === "line" || shape.type === "cable")) {
-    const snapped = orthogonalSnap({ x: shape.x2, y: shape.y2 }, point, 2);
-    return { ...shape, x: snapped.x, y: snapped.y, startAttachment: undefined };
+  if (shape.type === "line" || shape.type === "cable") {
+    return shape;
   }
 
-  if (interaction.mode === "line-end" && (shape.type === "line" || shape.type === "cable")) {
-    const snapped = orthogonalSnap({ x: shape.x, y: shape.y }, point, 2);
-    return { ...shape, x2: snapped.x, y2: snapped.y, endAttachment: undefined };
+  const center = getShapeCenter(shape);
+
+  if (nextType === "circle") {
+    const radius =
+      shape.type === "circle"
+        ? shape.radius
+        : Math.max(18, ("width" in shape ? shape.width : 36) / 2, ("height" in shape ? shape.height : 36) / 2);
+
+    return {
+      id: shape.id,
+      type: "circle",
+      x: center.x,
+      y: center.y,
+      radius,
+      label: shape.label,
+      groupName: shape.groupName,
+      cableType: shape.cableType,
+      strokeColor: shape.strokeColor,
+      fillColor: shape.fillColor,
+      strokeWidth: shape.strokeWidth,
+      strokeStyle: shape.strokeStyle,
+      opacity: shape.opacity,
+      rotation: 0,
+    };
   }
 
-  if (interaction.mode === "resize-circle" && shape.type === "circle") {
-    return { ...shape, radius: Math.max(10, distance(shape.x, shape.y, point.x, point.y)) };
+  if (nextType === "rectangle") {
+    const width = shape.type === "circle" ? shape.radius * 2 : shape.width;
+    const height = shape.type === "circle" ? shape.radius * 2 : shape.height;
+
+    return {
+      id: shape.id,
+      type: "rectangle",
+      x: center.x - width / 2,
+      y: center.y - height / 2,
+      width,
+      height,
+      label: shape.label,
+      groupName: shape.groupName,
+      cableType: shape.cableType,
+      strokeColor: shape.strokeColor,
+      fillColor: shape.fillColor,
+      strokeWidth: shape.strokeWidth,
+      strokeStyle: shape.strokeStyle,
+      opacity: shape.opacity,
+      rotation: shape.rotation,
+    };
   }
 
-  if (interaction.mode === "resize-se") {
-    if (shape.type === "rectangle") {
-      const s = initial as RectangleShape;
-      return { ...shape, width: Math.max(20, s.width + dx), height: Math.max(20, s.height + dy) };
-    }
-    if (shape.type === "socket" || shape.type === "switch") {
-      const s = initial as SocketShape | SwitchShape;
-      return { ...shape, width: Math.max(16, s.width + dx), height: Math.max(16, s.height + dy) };
-    }
-  }
+  if (nextType === "socket" || nextType === "switch") {
+    const width = shape.type === "circle" ? Math.max(36, shape.radius * 2) : Math.max(24, shape.width);
+    const height = shape.type === "circle" ? Math.max(36, shape.radius * 2) : Math.max(24, shape.height);
 
-  if (interaction.mode === "rotate") {
-    if (shape.type === "rectangle") {
-      const s = initial as RectangleShape;
-      const cx = s.x + s.width / 2;
-      const cy = s.y + s.height / 2;
-      return { ...shape, rotation: angleDeg(cx, cy, point.x, point.y) + 90 };
-    }
-    if (shape.type === "socket" || shape.type === "switch") {
-      const s = initial as SocketShape | SwitchShape;
-      return { ...shape, rotation: angleDeg(s.x, s.y, point.x, point.y) + 90 };
-    }
+    return {
+      id: shape.id,
+      type: nextType,
+      x: center.x,
+      y: center.y,
+      width,
+      height,
+      label: nextType === "socket" ? "Розетка" : "Выключатель",
+      groupName: shape.groupName,
+      cableType: shape.cableType,
+      strokeColor: shape.strokeColor,
+      fillColor: nextType === "socket" ? shape.fillColor || "#00e7a7" : shape.fillColor || "#ff7300",
+      strokeWidth: shape.strokeWidth,
+      strokeStyle: shape.strokeStyle,
+      opacity: shape.opacity,
+      rotation: shape.rotation,
+    };
   }
 
   return shape;
 }
 
-function hitTestHandle(px: number, py: number, shape: Shape): HandleType | null {
-  if (shape.type === "line" || shape.type === "cable") {
-    const midX = (shape.x + shape.x2) / 2;
-    const midY = (shape.y + shape.y2) / 2;
-    if (distance(px, py, shape.x, shape.y) <= 12) return "line-start";
-    if (distance(px, py, shape.x2, shape.y2) <= 12) return "line-end";
-    if (distance(px, py, midX, midY) <= 12) return "move";
-    return null;
+function getShapeCenter(shape: Shape) {
+  if (shape.type === "rectangle") {
+    return { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 };
   }
-
   if (shape.type === "circle") {
-    if (distance(px, py, shape.x + shape.radius, shape.y) <= 12) return "resize-circle";
-    return null;
+    return { x: shape.x, y: shape.y };
+  }
+  if (shape.type === "socket" || shape.type === "switch") {
+    return { x: shape.x, y: shape.y };
+  }
+  return { x: (shape.x + shape.x2) / 2, y: (shape.y + shape.y2) / 2 };
+}
+
+function getSelectionGeometry(shape: RectangleShape | SocketShape | SwitchShape) {
+  if (shape.type === "rectangle") {
+    const cx = shape.x + shape.width / 2;
+    const cy = shape.y + shape.height / 2;
+
+    const resizeHandle = rotatePoint(shape.x + shape.width, shape.y + shape.height, cx, cy, shape.rotation);
+    const topCenter = rotatePoint(shape.x + shape.width / 2, shape.y, cx, cy, shape.rotation);
+    const rotateHandle = rotatePoint(topCenter.x, topCenter.y - 28, topCenter.x, topCenter.y, shape.rotation);
+
+    return { center: { x: cx, y: cy }, resizeHandle, rotateHandle };
   }
 
-  if (shape.type === "rectangle" || shape.type === "socket" || shape.type === "switch") {
-    const geometry = getSelectionGeometry(shape);
-    if (distance(px, py, geometry.rotateHandle.x, geometry.rotateHandle.y) <= 12) return "rotate";
-    if (distance(px, py, geometry.resizeHandle.x, geometry.resizeHandle.y) <= 12) return "resize-se";
-  }
+  const cx = shape.x;
+  const cy = shape.y;
+  const resizeHandle = rotatePoint(shape.x + shape.width / 2, shape.y + shape.height / 2, cx, cy, shape.rotation);
+  const topCenter = rotatePoint(shape.x, shape.y - shape.height / 2, cx, cy, shape.rotation);
+  const rotateHandle = rotatePoint(topCenter.x, topCenter.y - 28, topCenter.x, topCenter.y, shape.rotation);
 
-  return null;
+  return { center: { x: cx, y: cy }, resizeHandle, rotateHandle };
 }
 
 function rotatePoint(px: number, py: number, cx: number, cy: number, angleDegValue: number) {
@@ -1566,27 +1723,6 @@ function orthogonalSnap(from: { x: number; y: number }, to: { x: number; y: numb
   if (Math.abs(dy) <= tolerance) return { x: to.x, y: from.y };
 
   return to;
-}
-
-function getSelectionGeometry(shape: RectangleShape | SocketShape | SwitchShape) {
-  if (shape.type === "rectangle") {
-    const cx = shape.x + shape.width / 2;
-    const cy = shape.y + shape.height / 2;
-
-    const resizeHandle = rotatePoint(shape.x + shape.width, shape.y + shape.height, cx, cy, shape.rotation);
-    const topCenter = rotatePoint(shape.x + shape.width / 2, shape.y, cx, cy, shape.rotation);
-    const rotateHandle = rotatePoint(topCenter.x, topCenter.y - 28, topCenter.x, topCenter.y, shape.rotation);
-
-    return { center: { x: cx, y: cy }, resizeHandle, rotateHandle };
-  }
-
-  const cx = shape.x;
-  const cy = shape.y;
-  const resizeHandle = rotatePoint(shape.x + shape.width / 2, shape.y + shape.height / 2, cx, cy, shape.rotation);
-  const topCenter = rotatePoint(shape.x, shape.y - shape.height / 2, cx, cy, shape.rotation);
-  const rotateHandle = rotatePoint(topCenter.x, topCenter.y - 28, topCenter.x, topCenter.y, shape.rotation);
-
-  return { center: { x: cx, y: cy }, resizeHandle, rotateHandle };
 }
 
 function getShapeAnchors(shape: Shape): AnchorPoint[] {
@@ -1747,6 +1883,99 @@ function isPointOnShape(px: number, py: number, shape: Shape) {
   return false;
 }
 
+function transformShape(shape: Shape, interaction: InteractionState, point: { x: number; y: number }): Shape {
+  const dx = point.x - interaction.startPointer.x;
+  const dy = point.y - interaction.startPointer.y;
+  const initial = interaction.initialShape;
+
+  if (interaction.mode === "move") {
+    if (shape.type === "line" || shape.type === "cable") {
+      const s = initial as LineShape;
+      return {
+        ...shape,
+        x: s.x + dx,
+        y: s.y + dy,
+        x2: s.x2 + dx,
+        y2: s.y2 + dy,
+      };
+    }
+    if (shape.type === "circle") {
+      const s = initial as CircleShape;
+      return { ...shape, x: s.x + dx, y: s.y + dy };
+    }
+    if (shape.type === "rectangle") {
+      const s = initial as RectangleShape;
+      return { ...shape, x: s.x + dx, y: s.y + dy };
+    }
+    const s = initial as SocketShape | SwitchShape;
+    return { ...shape, x: s.x + dx, y: s.y + dy };
+  }
+
+  if (interaction.mode === "line-start" && (shape.type === "line" || shape.type === "cable")) {
+    const snapped = orthogonalSnap({ x: shape.x2, y: shape.y2 }, point, 2);
+    return { ...shape, x: snapped.x, y: snapped.y, startAttachment: undefined };
+  }
+
+  if (interaction.mode === "line-end" && (shape.type === "line" || shape.type === "cable")) {
+    const snapped = orthogonalSnap({ x: shape.x, y: shape.y }, point, 2);
+    return { ...shape, x2: snapped.x, y2: snapped.y, endAttachment: undefined };
+  }
+
+  if (interaction.mode === "resize-circle" && shape.type === "circle") {
+    return { ...shape, radius: Math.max(10, distance(shape.x, shape.y, point.x, point.y)) };
+  }
+
+  if (interaction.mode === "resize-se") {
+    if (shape.type === "rectangle") {
+      const s = initial as RectangleShape;
+      return { ...shape, width: Math.max(20, s.width + dx), height: Math.max(20, s.height + dy) };
+    }
+    if (shape.type === "socket" || shape.type === "switch") {
+      const s = initial as SocketShape | SwitchShape;
+      return { ...shape, width: Math.max(16, s.width + dx), height: Math.max(16, s.height + dy) };
+    }
+  }
+
+  if (interaction.mode === "rotate") {
+    if (shape.type === "rectangle") {
+      const s = initial as RectangleShape;
+      const cx = s.x + s.width / 2;
+      const cy = s.y + s.height / 2;
+      return { ...shape, rotation: angleDeg(cx, cy, point.x, point.y) + 90 };
+    }
+    if (shape.type === "socket" || shape.type === "switch") {
+      const s = initial as SocketShape | SwitchShape;
+      return { ...shape, rotation: angleDeg(s.x, s.y, point.x, point.y) + 90 };
+    }
+  }
+
+  return shape;
+}
+
+function hitTestHandle(px: number, py: number, shape: Shape): HandleType | null {
+  if (shape.type === "line" || shape.type === "cable") {
+    const midX = (shape.x + shape.x2) / 2;
+    const midY = (shape.y + shape.y2) / 2;
+    if (distance(px, py, shape.x, shape.y) <= 12) return "line-start";
+    if (distance(px, py, shape.x2, shape.y2) <= 12) return "line-end";
+    if (distance(px, py, midX, midY) <= 12) return "move";
+    return null;
+  }
+
+  if (shape.type === "circle") {
+    if (distance(px, py, shape.x + shape.radius, shape.y) <= 12) return "resize-circle";
+    return null;
+  }
+
+  if (shape.type === "rectangle" || shape.type === "socket" || shape.type === "switch") {
+    const geometry = getSelectionGeometry(shape);
+    if (distance(px, py, geometry.rotateHandle.x, geometry.rotateHandle.y) <= 12) return "rotate";
+    if (distance(px, py, geometry.resizeHandle.x, geometry.resizeHandle.y) <= 12) return "resize-se";
+  }
+
+  return null;
+}
+
 function distance(x1: number, y1: number, x2: number, y2: number) {
   return Math.hypot(x2 - x1, y2 - y1);
 }
@@ -1782,21 +2011,61 @@ function cloneDeep<T>(value: T): T {
   return JSON.parse(JSON.stringify(value));
 }
 
+function IconUndo() {
+  return (
+    <svg viewBox="0 0 24 24" style={styles.iconSvg}>
+      <path d="M9 7H4v5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M20 17a8 8 0 0 0-8-8H4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconRedo() {
+  return (
+    <svg viewBox="0 0 24 24" style={styles.iconSvg}>
+      <path d="M15 7h5v5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4 17a8 8 0 0 1 8-8h8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconHelp() {
+  return (
+    <svg viewBox="0 0 24 24" style={styles.iconSvg}>
+      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 2-2.5 2.2-2.5 4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="12" cy="17" r="1" fill="currentColor" />
+    </svg>
+  );
+}
+
+function IconClose() {
+  return (
+    <svg viewBox="0 0 24 24" style={styles.iconSvg}>
+      <path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 const styles: Record<string, React.CSSProperties> = {
   page: {
-    minHeight: "100vh",
+    height: "100vh",
+    overflow: "hidden",
     background: "#0b1020",
     color: "#f2f6ff",
-    padding: 14,
+    padding: 12,
     boxSizing: "border-box",
     fontFamily: "Inter, Arial, sans-serif",
+    display: "grid",
+    gridTemplateRows: "auto 1fr",
+    gap: 10,
   },
   topbar: {
     display: "flex",
     justifyContent: "space-between",
     gap: 10,
-    marginBottom: 12,
     flexWrap: "wrap",
+    minHeight: 0,
   },
   leftBlock: {
     display: "flex",
@@ -1810,39 +2079,78 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#121937",
     border: "1px solid #26305b",
     borderRadius: 10,
-    padding: "10px 12px",
+    padding: "9px 12px",
   },
   projectInput: {
     background: "#121937",
     color: "#fff",
     border: "1px solid #27305f",
     borderRadius: 10,
-    padding: "10px 12px",
+    padding: "9px 12px",
     minWidth: 220,
+    height: 38,
+    boxSizing: "border-box",
   },
   btn: {
     background: "#1a234a",
     color: "#fff",
     border: "1px solid #33407a",
     borderRadius: 10,
-    padding: "10px 12px",
+    padding: "9px 12px",
     cursor: "pointer",
+    height: 38,
   },
   btnActive: {
     background: "#2948c7",
     color: "#fff",
     border: "1px solid #7aa0ff",
     borderRadius: 10,
-    padding: "10px 12px",
+    padding: "9px 12px",
     cursor: "pointer",
+    height: 38,
+  },
+  iconBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    border: "1px solid #33407a",
+    background: "#1a234a",
+    color: "#fff",
+    cursor: "pointer",
+    display: "grid",
+    placeItems: "center",
+    padding: 0,
+  },
+  iconBtnSmall: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    border: "1px solid #33407a",
+    background: "#1a234a",
+    color: "#fff",
+    cursor: "pointer",
+    display: "grid",
+    placeItems: "center",
+    padding: 0,
+  },
+  iconSvg: {
+    width: 18,
+    height: 18,
+    display: "block",
   },
   main: {
     display: "grid",
-    gridTemplateColumns: "1fr 285px",
-    gap: 12,
+    gridTemplateColumns: "1fr 248px",
+    gap: 10,
+    minHeight: 0,
+    overflow: "hidden",
   },
   canvasWrap: {
     minWidth: 0,
+    minHeight: 0,
+    display: "grid",
+    gridTemplateRows: "auto 1fr",
+    gap: 10,
   },
   statusBar: {
     display: "flex",
@@ -1852,13 +2160,14 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #26305b",
     borderRadius: 12,
     padding: "10px 12px",
-    marginBottom: 10,
     flexWrap: "wrap",
   },
   board: {
     position: "relative",
+    minWidth: 0,
+    minHeight: 0,
     width: "100%",
-    aspectRatio: "1400 / 900",
+    height: "100%",
     border: "1px solid #26305b",
     borderRadius: 14,
     overflow: "hidden",
@@ -1872,58 +2181,130 @@ const styles: Record<string, React.CSSProperties> = {
   },
   sidebar: {
     display: "grid",
-    gap: 10,
+    gap: 8,
     alignContent: "start",
+    minHeight: 0,
+    overflowY: "auto",
+    paddingRight: 2,
   },
   card: {
     background: "#121937",
     border: "1px solid #26305b",
-    borderRadius: 14,
-    padding: 12,
+    borderRadius: 12,
+    padding: 10,
   },
   cardTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: 700,
-    marginBottom: 10,
-  },
-  field: {
-    display: "grid",
-    gap: 5,
     marginBottom: 8,
   },
+  compactField: {
+    display: "grid",
+    gap: 4,
+    marginBottom: 7,
+  },
   label: {
-    fontSize: 12,
+    fontSize: 11,
     color: "#b9c7ef",
   },
-  input: {
+  inputCompact: {
     background: "#0c1330",
     color: "#fff",
     border: "1px solid #2a376f",
-    borderRadius: 10,
-    padding: "9px 10px",
+    borderRadius: 9,
+    padding: "8px 9px",
     width: "100%",
     boxSizing: "border-box",
+    fontSize: 13,
+    height: 34,
   },
-  hint: {
+  hintCompact: {
     color: "#b9c7ef",
-    fontSize: 12,
-    lineHeight: 1.45,
+    fontSize: 11,
+    lineHeight: 1.4,
+  },
+  rowLabel: {
+    fontSize: 11,
+    color: "#b9c7ef",
+    marginBottom: 6,
+    marginTop: 2,
+  },
+  styleRow: {
+    display: "grid",
+    gridTemplateColumns: "34px 34px 1fr 1fr",
+    gap: 6,
+    marginBottom: 8,
+    alignItems: "center",
+  },
+  colorSwatchLabel: {
+    position: "relative",
+    display: "block",
+    width: 34,
+    height: 34,
+    cursor: "pointer",
+  },
+  hiddenColorInput: {
+    position: "absolute",
+    inset: 0,
+    opacity: 0,
+    cursor: "pointer",
+  },
+  colorSwatch: {
+    display: "block",
+    width: 34,
+    height: 34,
+    borderRadius: 9,
+    border: "1px solid #33407a",
+    boxSizing: "border-box",
+  },
+  colorSwatchGhost: {
+    display: "block",
+    width: 34,
+    height: 34,
+  },
+  lineStyleBtn: {
+    height: 34,
+    borderRadius: 9,
+    border: "1px solid #33407a",
+    background: "#0c1330",
+    cursor: "pointer",
+    display: "grid",
+    placeItems: "center",
+    padding: 0,
+  },
+  lineStyleBtnActive: {
+    height: 34,
+    borderRadius: 9,
+    border: "1px solid #7aa0ff",
+    background: "#18244f",
+    cursor: "pointer",
+    display: "grid",
+    placeItems: "center",
+    padding: 0,
+  },
+  solidPreview: {
+    display: "block",
+    width: 26,
+    height: 2,
+    background: "#dce7ff",
+    borderRadius: 999,
+  },
+  dashedPreview: {
+    display: "block",
+    width: 26,
+    height: 2,
+    background:
+      "repeating-linear-gradient(to right, #dce7ff 0 6px, transparent 6px 10px)",
+    borderRadius: 999,
   },
   estimateRow: {
     display: "grid",
-    gap: 4,
+    gap: 3,
     background: "#0c1330",
     border: "1px solid #26305b",
     borderRadius: 10,
-    padding: 9,
-  },
-  colorInput: {
-    width: "100%",
-    height: 38,
-    background: "#0c1330",
-    border: "1px solid #2a376f",
-    borderRadius: 10,
-    padding: 4,
+    padding: 8,
+    fontSize: 12,
   },
   deleteBtn: {
     background: "#4a1d24",
@@ -1933,28 +2314,31 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "10px 12px",
     cursor: "pointer",
     width: "100%",
+    marginTop: 4,
   },
   clearBtn: {
     background: "#4a1d24",
     color: "#fff",
     border: "1px solid #8a3f4d",
     borderRadius: 10,
-    padding: "12px 14px",
+    padding: "10px 12px",
     cursor: "pointer",
   },
   saveBadge: {
     position: "fixed",
-    right: 18,
-    bottom: 18,
+    right: 16,
+    bottom: 16,
     display: "flex",
     alignItems: "center",
     gap: 8,
-    background: "rgba(12,19,48,.92)",
+    background: "rgba(12,19,48,.96)",
     border: "1px solid #2a376f",
     borderRadius: 999,
     padding: "8px 12px",
     zIndex: 100,
     boxShadow: "0 8px 24px rgba(0,0,0,.3)",
+    cursor: "pointer",
+    color: "#dce7ff",
   },
   saveDot: {
     width: 10,
@@ -1962,10 +2346,15 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "50%",
     background: "#00e7a7",
     transition: "all .35s ease",
+    flex: "0 0 auto",
   },
   saveText: {
     fontSize: 12,
-    color: "#dce7ff",
+    fontWeight: 600,
+  },
+  saveTime: {
+    fontSize: 11,
+    opacity: 0.75,
   },
   zoomControls: {
     position: "absolute",
@@ -2013,6 +2402,68 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
     height: "100%",
     display: "block",
+    cursor: "pointer",
+  },
+  modalOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(5,8,18,.68)",
+    display: "grid",
+    placeItems: "center",
+    zIndex: 200,
+    padding: 20,
+  },
+  modalCard: {
+    width: "min(420px, 100%)",
+    background: "#121937",
+    border: "1px solid #33407a",
+    borderRadius: 14,
+    padding: 14,
+    boxShadow: "0 16px 40px rgba(0,0,0,.35)",
+  },
+  modalHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 10,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: 700,
+  },
+  modalText: {
+    fontSize: 14,
+    color: "#dce7ff",
+    lineHeight: 1.5,
+  },
+  modalList: {
+    display: "grid",
+    gap: 8,
+    fontSize: 14,
+    color: "#dce7ff",
+    lineHeight: 1.5,
+  },
+  modalActions: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: 8,
+    marginTop: 14,
+  },
+  modalBtn: {
+    background: "#1a234a",
+    color: "#fff",
+    border: "1px solid #33407a",
+    borderRadius: 10,
+    padding: "9px 12px",
+    cursor: "pointer",
+  },
+  modalBtnDanger: {
+    background: "#4a1d24",
+    color: "#fff",
+    border: "1px solid #8a3f4d",
+    borderRadius: 10,
+    padding: "9px 12px",
     cursor: "pointer",
   },
 };
