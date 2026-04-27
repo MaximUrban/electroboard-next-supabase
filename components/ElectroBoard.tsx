@@ -231,11 +231,14 @@ function getCadShapeAsset(shape: Shape, assets: CadAsset[]) {
 }
 
 function enhanceCadStroke(primitive: CadPrimitive, zoom: number) {
-  const base = primitive.strokeWidth ?? 1;
+  const base =
+    primitive.type === "text"
+      ? 1
+      : (primitive.strokeWidth ?? 1);
+
   const minVisible = 1.25 / Math.max(zoom, 0.25);
   return Math.max(base * 1.35, minVisible);
 }
-
 function ensurePositiveRect(x: number, y: number, width: number, height: number) {
   let nextX = x;
   let nextY = y;
