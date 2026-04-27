@@ -555,6 +555,68 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
       return next;
     });
   }
+  function renameCadLayer(shapeId: string, layerId: string, nextName: string) {
+  const trimmed = nextName.trim();
+  if (!trimmed) return;
+
+  const shape = shapes.find((item) => item.id === shapeId);
+  if (!shape || shape.type !== "cad") return;
+
+  setCadAssets((prevAssets) => {
+    const nextAssets = prevAssets.map((asset) => {
+      if (asset.id !== shape.assetId) return asset;
+
+      return {
+        ...asset,
+        layers: asset.layers.map((layer) =>
+          layer.id === layerId
+            ? { ...layer, name: trimmed }
+            : layer
+        ),
+      };
+    });
+
+    window.setTimeout(() => commitHistory(shapes, nextAssets), 0);
+    return nextAssets;
+  });
+}
+
+function deleteCadLayer(shapeId: string, layerId: string) {
+  const shape = shapes.find((item) => item.id === shapeId);
+  if (!shape || shape.type !== "cad") return;
+
+  setCadAssets((prevAssets) => {
+    const nextAssets = prevAssets.map((asset) => {
+      if (asset.id !== shape.assetId) return asset;
+
+      return {
+        ...asset,
+        layers: asset.layers.filter((layer) => layer.id !== layerId),
+        primitives: asset.primitives.filter((primitive) => primitive.layerId !== layerId),
+      };
+    });
+
+    setShapes((prevShapes) => {
+      const nextShapes = prevShapes.map((item) => {
+        if (item.id !== shapeId) return item;
+        if (item.type !== "cad") return item;
+
+        const nextLayerState = { ...item.layerState };
+        delete nextLayerState[layerId];
+
+        return {
+          ...item,
+          layerState: nextLayerState,
+        };
+      });
+
+      window.setTimeout(() => commitHistory(nextShapes, nextAssets), 0);
+      return nextShapes;
+    });
+
+    return nextAssets;
+  });
+}
 
   function nudgeSelected(dx: number, dy: number) {
     if (!selectedId) return;
@@ -1634,21 +1696,37 @@ function placeImportedCadAsset(cadAsset: CadAsset, displayName: string) {
 
               <div style={{ display: "grid", gap: 8 }}>
                 {selectedCadAsset.layers.map((layer) => {
-                  const visible = selectedShape.layerState[layer.id] ?? layer.visible;
+  const visible = selectedShape.layerState[layer.id] ?? layer.visible;
 
-                  return (
-                    <label key={layer.id} style={styles.layerRow}>
-                      <input
-                        type="checkbox"
-                        checked={visible}
-                        onChange={(e) =>
-                          setCadLayerVisibility(selectedShape.id, layer.id, e.target.checked)
-                        }
-                      />
-                      <span>{layer.name}</span>
-                    </label>
-                  );
-                })}
+  return (
+    <div key={layer.id} style={styles.layerRowEditable}>
+      <input
+        type="checkbox"
+        checked={visible}
+        onChange={(e) =>
+          setCadLayerVisibility(selectedShape.id, layer.id, e.target.checked)
+        }
+      />
+
+      <input
+        value={layer.name}
+        onChange={(e) =>
+          renameCadLayer(selectedShape.id, layer.id, e.target.value)
+        }
+        style={styles.layerNameInput}
+      />
+
+      <button
+        type="button"
+        style={styles.layerDeleteBtn}
+        onClick={() => deleteCadLayer(selectedShape.id, layer.id)}
+        title="Удалить слой"
+      >
+        ×
+      </button>
+    </div>
+  );
+})}
               </div>
             </div>
           ) : null}
@@ -3270,4 +3348,36 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     color: "#dce7ff",
   },
+  layerRowEditable: {
+  display: "grid",
+  gridTemplateColumns: "16px 1fr 30px",
+  alignItems: "center",
+  gap: 8,
+  fontSize: 13,
+  color: "#dce7ff",
+},
+
+layerNameInput: {
+  background: "#0c1330",
+  color: "#fff",
+  border: "1px solid #2a376f",
+  borderRadius: 8,
+  padding: "6px 8px",
+  width: "100%",
+  boxSizing: "border-box",
+  fontSize: 12,
+  height: 30,
+},
+
+layerDeleteBtn: {
+  width: 30,
+  height: 30,
+  borderRadius: 8,
+  border: "1px solid #8a3f4d",
+  background: "#4a1d24",
+  color: "#fff",
+  cursor: "pointer",
+  padding: 0,
+  lineHeight: 1,
+},
 };
