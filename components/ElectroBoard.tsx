@@ -841,19 +841,20 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
     window.setTimeout(() => commitHistory([], [], 0), 0);
   }
 
-  const objectTypeOptions = selectedShape
-    ? selectedShape.type === "line" || selectedShape.type === "cable"
+ const objectTypeOptions =
+  selectedShape == null
+    ? []
+    : selectedShape.type === "line" || selectedShape.type === "cable"
       ? [
           { value: "line", label: "Линия" },
           { value: "cable", label: "Кабель" },
         ]
       : [
-          { value: "", label: "Прямоугольник" },
+          { value: "rectangle", label: "Прямоугольник" },
           { value: "circle", label: "Окружность" },
           { value: "socket", label: "Розетка" },
           { value: "switch", label: "Выключатель" },
-        ]
-    : [];
+        ];
 
   return (
     <div style={styles.page}>
@@ -876,7 +877,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
 
         <div style={styles.leftBlock}>
           <button style={tool === "select" ? styles.btnActive : styles.btn} onClick={() => setTool("select")}>Выбор</button>
-          <button style={tool === "" ? styles.btnActive : styles.btn} onClick={() => setTool("")}>Прямоугольник</button>
+          <button style={tool === "rectangle" ? styles.btnActive : styles.btn} onClick={() => setTool("rectangle")}>Прямоугольник</button>
           <button style={tool === "circle" ? styles.btnActive : styles.btn} onClick={() => setTool("circle")}>Окружность</button>
           <button style={tool === "line" ? styles.btnActive : styles.btn} onClick={() => setTool("line")}>Линия</button>
           <button style={tool === "cable" ? styles.btnActive : styles.btn} onClick={() => setTool("cable")}>Кабель</button>
