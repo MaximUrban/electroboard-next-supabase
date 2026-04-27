@@ -1395,11 +1395,10 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
                 />
 
                 {shapes.map((shape) => (
-                  <React.Fragment key={shape.id}>
-                    {renderShape(shape, selectedId === shape.id, cadAssets)}
-                    {selectedId === shape.id ? renderSelectionOverlay(shape) : null}
-                  </React.Fragment>
-                ))}
+  <React.Fragment key={shape.id}>
+    {renderShape(shape, selectedId === shape.id, cadAssets)}
+  </React.Fragment>
+))}
 
                 {draftLine ? renderShape(draftLine, true, cadAssets) : null}
 
@@ -1447,6 +1446,7 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
                   />
                 ) : null}
               </g>
+              {selectedShape ? renderSelectionOverlayScreen(selectedShape, camera) : null}
             </svg>
 
             <div style={styles.zoomControls}>
@@ -2800,6 +2800,67 @@ function getSelectionGeometry(
     rotateHandle,
   };
 }
+function hitTestHandleScreen(
+  screenPoint: { x: number; y: number },
+  shape: Shape,
+  camera: CameraState
+): HandleType | null {
+  const cornerRadiusPx = 22;
+  const sideRadiusPx = 18;
+  const rotateRadiusPx = 20;
+  const lineEndRadiusPx = 18;
+  const lineMidRadiusPx = 20;
+
+  const distToWorldPoint = (worldX: number, worldY: number) => {
+    const p = projectWorldToScreen(worldX, worldY, camera);
+    return distance(screenPoint.x, screenPoint.y, p.x, p.y);
+  };
+
+  if (shape.type === "line" || shape.type === "cable") {
+    const midX = (shape.x + shape.x2) / 2;
+    const midY = (shape.y + shape.y2) / 2;
+
+    if (distToWorldPoint(shape.x, shape.y) <= lineEndRadiusPx) return "line-start";
+    if (distToWorldPoint(shape.x2, shape.y2) <= lineEndRadiusPx) return "line-end";
+    if (distToWorldPoint(midX, midY) <= lineMidRadiusPx) return "move";
+    return null;
+  }
+
+  if (shape.type === "circle") {
+    if (distToWorldPoint(shape.x + shape.radius, shape.y) <= cornerRadiusPx) {
+      return "resize-circle";
+    }
+    return null;
+  }
+
+  if (
+    shape.type === "rectangle" ||
+    shape.type === "socket" ||
+    shape.type === "switch" ||
+    shape.type === "cad"
+  ) {
+    const geometry = getSelectionGeometry(shape);
+
+    if (
+      distToWorldPoint(geometry.rotateHandle.x, geometry.rotateHandle.y) <=
+      rotateRadiusPx
+    ) {
+      return "rotate";
+    }
+
+    if (distToWorldPoint(geometry.corners.nw.x, geometry.corners.nw.y) <= cornerRadiusPx) return "resize-nw";
+    if (distToWorldPoint(geometry.corners.ne.x, geometry.corners.ne.y) <= cornerRadiusPx) return "resize-ne";
+    if (distToWorldPoint(geometry.corners.se.x, geometry.corners.se.y) <= cornerRadiusPx) return "resize-se";
+    if (distToWorldPoint(geometry.corners.sw.x, geometry.corners.sw.y) <= cornerRadiusPx) return "resize-sw";
+
+    if (distToWorldPoint(geometry.sides.n.x, geometry.sides.n.y) <= sideRadiusPx) return "resize-n";
+    if (distToWorldPoint(geometry.sides.e.x, geometry.sides.e.y) <= sideRadiusPx) return "resize-e";
+    if (distToWorldPoint(geometry.sides.s.x, geometry.sides.s.y) <= sideRadiusPx) return "resize-s";
+    if (distToWorldPoint(geometry.sides.w.x, geometry.sides.w.y) <= sideRadiusPx) return "resize-w";
+  }
+
+  return null;
+}
   function hitTestHandleScreen(
   screenPoint: { x: number; y: number },
   shape: Shape,
@@ -2863,7 +2924,147 @@ function getSelectionGeometry(
 
   return null;
 }
+function renderSelectionOverlayScreen(shape: Shape, camera: CameraState) {
+  const mainR = 10;
+  const sideR = 8;
+  const anchorR = 4;
+
+  if (shape.type === "line" || shape.type === "cable") {
+    const a = projectWorldToScreen(shape.x, shape.y, camera);
+    const b = projectWorldToScreen(shape.x2, shape.y2, camera);
+    const mid = projectWorldToScreen((shape.x + shape.x2) / 2, (shape.y + shape.y2) / 2, camera);
+
+    return (
+      <g pointerEvents="none">
+        <circle cx={a.x} cy={a.y} r={mainR} fill="#fff" stroke="#3d63ff" strokeWidth="3" />
+        <circle cx={b.x} cy={b.y} r={mainR} fill="#fff" stroke="#3d63ff" strokeWidth="3" />
+        <circle cx={mid.x} cy={mid.y} r="8" fill="#3d63ff" stroke="#fff" strokeWidth="2" />
+      </g>
+    );
+  }
+
+  const anchors = getShapeAnchors(shape).map((a) => ({
+    ...a,
+    ...projectWorldToScreen(a.x, a.y, camera),
+  }));
+
+  if (shape.type === "circle") {
+    const handle = projectWorldToScreen(shape.x + shape.radius, shape.y, camera);
+
+    return (
+      <g pointerEvents="none">
+        {anchors.map((a) => (
+          <circle
+            key={a.id}
+            cx={a.x}
+            cy={a.y}
+            r={anchorR}
+            fill="#9ec1ff"
+            stroke="#fff"
+            strokeWidth="1.5"
+          />
+        ))}
+
+        <circle
+          cx={handle.x}
+          cy={handle.y}
+          r={mainR}
+          fill="#fff"
+          stroke="#3d63ff"
+          strokeWidth="3"
+        />
+      </g>
+    );
+  }
+
+  if (
+    shape.type === "rectangle" ||
+    shape.type === "socket" ||
+    shape.type === "switch" ||
+    shape.type === "cad"
+  ) {
+    const geometry = getSelectionGeometry(shape);
+
+    const center = projectWorldToScreen(geometry.center.x, geometry.center.y, camera);
+    const rotateHandle = projectWorldToScreen(
+      geometry.rotateHandle.x,
+      geometry.rotateHandle.y,
+      camera
+    );
+
+    const corners = {
+      nw: projectWorldToScreen(geometry.corners.nw.x, geometry.corners.nw.y, camera),
+      ne: projectWorldToScreen(geometry.corners.ne.x, geometry.corners.ne.y, camera),
+      se: projectWorldToScreen(geometry.corners.se.x, geometry.corners.se.y, camera),
+      sw: projectWorldToScreen(geometry.corners.sw.x, geometry.corners.sw.y, camera),
+    };
+
+    const sides = {
+      n: projectWorldToScreen(geometry.sides.n.x, geometry.sides.n.y, camera),
+      e: projectWorldToScreen(geometry.sides.e.x, geometry.sides.e.y, camera),
+      s: projectWorldToScreen(geometry.sides.s.x, geometry.sides.s.y, camera),
+      w: projectWorldToScreen(geometry.sides.w.x, geometry.sides.w.y, camera),
+    };
+
+    return (
+      <g pointerEvents="none">
+        {anchors.map((a) => (
+          <circle
+            key={a.id}
+            cx={a.x}
+            cy={a.y}
+            r={anchorR}
+            fill="#9ec1ff"
+            stroke="#fff"
+            strokeWidth="1.5"
+          />
+        ))}
+
+        <line
+          x1={center.x}
+          y1={center.y}
+          x2={rotateHandle.x}
+          y2={rotateHandle.y}
+          stroke="#79a6ff"
+          strokeWidth="2"
+          opacity="0.7"
+        />
+
+        <circle cx={corners.nw.x} cy={corners.nw.y} r={mainR} fill="#fff" stroke="#3d63ff" strokeWidth="3" />
+        <circle cx={corners.ne.x} cy={corners.ne.y} r={mainR} fill="#fff" stroke="#3d63ff" strokeWidth="3" />
+        <circle cx={corners.se.x} cy={corners.se.y} r={mainR} fill="#fff" stroke="#3d63ff" strokeWidth="3" />
+        <circle cx={corners.sw.x} cy={corners.sw.y} r={mainR} fill="#fff" stroke="#3d63ff" strokeWidth="3" />
+
+        <circle cx={sides.n.x} cy={sides.n.y} r={sideR} fill="#dfe8ff" stroke="#3d63ff" strokeWidth="2.5" />
+        <circle cx={sides.e.x} cy={sides.e.y} r={sideR} fill="#dfe8ff" stroke="#3d63ff" strokeWidth="2.5" />
+        <circle cx={sides.s.x} cy={sides.s.y} r={sideR} fill="#dfe8ff" stroke="#3d63ff" strokeWidth="2.5" />
+        <circle cx={sides.w.x} cy={sides.w.y} r={sideR} fill="#dfe8ff" stroke="#3d63ff" strokeWidth="2.5" />
+
+        <circle
+          cx={rotateHandle.x}
+          cy={rotateHandle.y}
+          r={mainR}
+          fill="#fff"
+          stroke="#3d63ff"
+          strokeWidth="3"
+        />
+      </g>
+    );
+  }
+
+  return null;
+}
 function worldToScreenPoint(
+  worldX: number,
+  worldY: number,
+  camera: CameraState
+) {
+  return {
+    x: camera.x + worldX * camera.zoom,
+    y: camera.y + worldY * camera.zoom,
+  };
+}
+function projectWorldToScreen(
   worldX: number,
   worldY: number,
   camera: CameraState
