@@ -1242,7 +1242,7 @@ function MiniMap({
   shapes: Shape[];
   camera: CameraState;
   canvasSize: { width: number; height: number };
-  onJump: (worldX: number; worldY: number) => void;
+  onJump: (worldX: number, worldY: number) => void;
 }) {
   const miniWidth = 220;
   const miniHeight = 150;
