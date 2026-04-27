@@ -945,14 +945,18 @@ export default function ElectroBoard({ projectId }: { projectId: string }) {
             if (!original) return shape;
 
             if (shape.type === "line" || shape.type === "cable") {
-              return {
-                ...shape,
-                x: original.x + dx + extraDx,
-                y: original.y + dy + extraDy,
-                x2: original.x2 + dx + extraDx,
-                y2: original.y2 + dy + extraDy,
-              };
-            }
+  if (original.type !== "line" && original.type !== "cable") {
+    return shape;
+  }
+
+  return {
+    ...shape,
+    x: original.x + dx + extraDx,
+    y: original.y + dy + extraDy,
+    x2: original.x2 + dx + extraDx,
+    y2: original.y2 + dy + extraDy,
+  };
+}
 
             return {
               ...shape,
