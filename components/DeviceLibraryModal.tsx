@@ -8,37 +8,6 @@ import {
   type LibraryCountry,
 } from "@/lib/device-library";
 
-function fallbackImage(title: string, article: string) {
-  const svg = `
-  <svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240">
-    <rect width="240" height="240" rx="20" fill="#ffffff"/>
-    <rect x="24" y="18" width="192" height="204" rx="16" fill="#f3f6fb" stroke="#cfd8ea" stroke-width="2"/>
-    <rect x="58" y="72" width="124" height="92" rx="10" fill="#e5e7eb" stroke="#9ca3af" stroke-width="2"/>
-    <rect x="72" y="84" width="28" height="68" rx="6" fill="#d1d5db"/>
-    <rect x="110" y="84" width="56" height="16" rx="4" fill="#111827"/>
-    <rect x="110" y="108" width="42" height="10" rx="4" fill="#9ca3af"/>
-    <rect x="110" y="126" width="46" height="10" rx="4" fill="#9ca3af"/>
-    <rect x="110" y="144" width="32" height="10" rx="4" fill="#9ca3af"/>
-    <text x="120" y="194" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#111827">${escapeXml(
-      article
-    )}</text>
-    <text x="120" y="214" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#4b5563">${escapeXml(
-      title.slice(0, 28)
-    )}</text>
-  </svg>`;
-
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
-}
-
-function escapeXml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
-}
-
 export default function DeviceLibraryModal({
   open,
   initialCountry,
@@ -164,13 +133,9 @@ export default function DeviceLibraryModal({
               <div key={item.id} style={styles.card}>
                 <div style={styles.imageWrap}>
                   <img
-                    src={item.imageUrl}
+                    src={item.catalogImageUrl}
                     alt={item.name}
                     style={styles.image}
-                    onError={(e) => {
-                      const target = e.currentTarget;
-                      target.src = fallbackImage(item.name, item.article);
-                    }}
                   />
                 </div>
 
@@ -181,25 +146,25 @@ export default function DeviceLibraryModal({
                     {item.brand} · {item.series}
                   </div>
 
-                  <div style={styles.meta}>
-                    {item.categoryLabel}
-                  </div>
+                  <div style={styles.meta}>{item.categoryLabel}</div>
 
                   <div style={styles.meta}>
                     Артикул: {item.article} · {item.modules} мод.
                   </div>
 
+                  <div style={styles.assetsTitle}>Доступные 2D-источники</div>
+
                   <div style={styles.variants}>
-                    {item.cadVariants.map((variant) => (
-                      <span key={variant.id} style={styles.variantChip}>
-                        {variant.label}
+                    {item.drawingAssets.map((asset) => (
+                      <span key={asset.id} style={styles.variantChip}>
+                        {asset.label}
                       </span>
                     ))}
                   </div>
                 </div>
 
                 <button style={styles.addBtn} onClick={() => onAdd(item)}>
-                  Добавить
+                  Выбрать
                 </button>
               </div>
             ))
@@ -324,11 +289,18 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     marginBottom: 4,
   },
+  assetsTitle: {
+    color: "#dce7ff",
+    fontSize: 12,
+    marginTop: 8,
+    marginBottom: 6,
+    fontWeight: 600,
+  },
   variants: {
     display: "flex",
     gap: 6,
     flexWrap: "wrap",
-    marginTop: 8,
+    marginTop: 4,
   },
   variantChip: {
     fontSize: 12,
